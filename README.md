@@ -86,3 +86,48 @@ The code given is structured as follows. Feel free however to modify the structu
 * [Sqlite3](https://sqlite.org/index.html) - Database storage engine
 
 Happy hacking 😁!
+
+
+## Work log
+
+### Initial steps
+
+Initially I just had some basic knowledge about Kotlin, so I decided to take advantage of the challenge to learn Kotlin in depth. 
+The first step, before facing the challenge itself, was indeed learning about Kotlin. 
+I spent about 6-8 hours reading the official documentation, 
+
+Next step was reading and understanding the challenge purpose. Once that, I reviewed all the code structure and performed some executions to learn about different components and its interactions.
+Even I made a diagram to have a visual about the anteus structure. I spent like on hour on this.
+
+### Initial concerns
+
+During the analysis phase I have identified some key points to be aware of: 
+* Scheduled task. Should the application provide a mode to start the process immediately after boot?. In case of an unexpected error during the task execution, we will want to start the process again.
+* Billing service basic flow. Two possibilities
+  * Two nested loops, first to fetch customers, second to fetch pending invoices by customer. 
+  * One loop over all pending invoices (sorted by customerId).
+  * I prefer the first one, processing customers in order. This way we will process all the customers pending invoices at the same moment. In case of issues it will be easier to monitor. Furthermore, we will take advantage of the CustomerNotFoundException skipping remaining invoices.
+* Each customer invoice is processed individually. That is, the invoice is charged and then updated in the db (status PAID).
+  * What if the updating invoice status process fails? The invoice is already processed but the BD does not reflect the status. An initial idea could be implementing a new service that stores those failures to be re-processed again in some moment (like a `dead letter queue`)
+* Assuming a huge amount of Customers, a `pagination` mechanism to get customers would be great.
+* Concurrency. Different customers can be processed in parallel.
+* Error handling. 
+  * NetworkException: retry indefinitely
+  * Customer not found exception: log and pass the next customer
+  * CurrencyMismatchException: log and pass the next invoice 
+
+### Initial prototype
+
+Having in mind the concerns above-mentioned, I made some decisions for the initial prototype:
+* Scheduled task. I had a look at Krontab, and it seemed easy to implement, but I decided to postpone its implementation to focus on the billing service logic.
+* Billing service initial implementation. 
+  * Two nested loops over customer and customer-invoices.
+  * Each invoice is processed and updated in the DB atomically.
+  * Error handling with retry for NetworkExceptions
+  * No pagination mechanism.
+  * No concurrency.
+  * Errors on update invoice operation are just logged.
+
+Time spent initial prototype, analysis, design, implementation and tests: 8 hours
+
+ 
