@@ -26,7 +26,7 @@ fun Project.kotlinProject() {
         "testImplementation"("org.junit.jupiter:junit-jupiter-params:$junitVersion")
         "runtime"("org.junit.jupiter:junit-jupiter-engine:$junitVersion")
 
-        //courutines
+        //coroutines
         "implementation"("org.jetbrains.kotlinx:kotlinx-coroutines-core:$courutines")
         "testImplementation"("org.jetbrains.kotlinx:kotlinx-coroutines-test:$courutines")
     }

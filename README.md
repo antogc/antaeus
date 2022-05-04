@@ -130,4 +130,28 @@ Having in mind the concerns above-mentioned, I made some decisions for the initi
 
 Time spent initial prototype, analysis, design, implementation and tests: 8 hours
 
- 
+### Second evolution
+
+The main idea for the next evolution was to implement the billing service process in a concurrent way. The idea is to 
+have two different process at the same time, on one side a process fetching customers from the db, and on the other side, 
+the billing process for customer's invoices. 
+
+For the `fetch all Customers` process, I will implement a `keyset pagination` mechanism. The idea is to fetch `page by page` 
+from the DB but providing customers `one by one`. For that purpose I will use a Channel.
+* Fetch Customer process: get page by page -> forEach customer in page -> channel.send customer
+* Invoice billing process: channel.receive customer -> get Invoices by customer -> process invoice in a courutine
+
+Two important questions:
+* Why Keyset pagination? Because it provides better performance than regular offset pagination.
+* Why pagination for customers and no for invoices. Looking at the initial data it seems to me that 
+the number of customers could be large enough to require a pagination mechanism, I'm not sure the same can happen for invoices.
+Assuming a regular behaviour where invoices are processed periodically, I would not expect too much growth.
+
+Time spent: 4 hours
+
+### Improvements
+
+Implement scheduled task
+Add a notification service (update invoice issue)
+Provide extra endpoints
+Provide configuration file

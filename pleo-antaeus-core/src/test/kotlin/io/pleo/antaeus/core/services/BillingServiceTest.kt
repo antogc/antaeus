@@ -7,7 +7,9 @@ import io.pleo.antaeus.core.exceptions.NetworkException
 import io.pleo.antaeus.core.external.PaymentProvider
 import io.pleo.antaeus.models.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -28,90 +30,104 @@ internal class BillingServiceTest {
     @BeforeEach
     fun setup() {
         billingService = BillingService(paymentProvider, customerService, invoiceService)
-        expectCustomersAndInvoices()
-        expectInvoiceStatusUpdated()
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `will process payments`() = runTest {
+        expectCustomers()
+        expectInvoicesForCustomers()
+        expectInvoiceStatusUpdated()
         expectPaymentProviderChargesInvoices()
 
-        val job = launch { billingService.init() }
-        job.join()
+        billingService.init()
 
-        verify(exactly = 1) { customerService.fetchAll() }
+        coVerify(exactly = 1) { customerService.initCustomerPagesChannel(any()) }
         verify(exactly = 2) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = 4) { paymentProvider.charge(any()) }
         verify(exactly = 4) { invoiceService.updatePaidInvoice(any()) }
-        confirmVerified(paymentProvider, invoiceService)
+        confirmVerified(customerService, invoiceService, customerService)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `will retry payments when NetworkException is raised`() = runTest {
+        expectCustomers()
+        expectInvoicesForCustomers()
+        expectInvoiceStatusUpdated()
         expectPaymentProviderReturnsExceptionTemporally()
 
-        val job = launch { billingService.init() }
-        job.join()
+        billingService.init()
 
-        verify(exactly = 1) { customerService.fetchAll() }
+        coVerify(exactly = 1) { customerService.initCustomerPagesChannel(any()) }
         verify(exactly = 2) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = 5) { paymentProvider.charge(any()) } //4 + 1 retry
         verify(exactly = 4) { invoiceService.updatePaidInvoice(any()) }
-        confirmVerified(paymentProvider, invoiceService)
+        confirmVerified(customerService, invoiceService, customerService)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `will skip user customer when CustomerNotFoundException raised`() = runTest {
+        expectCustomers()
+        expectInvoicesForCustomers()
+        expectInvoiceStatusUpdated()
         expectPaymentProviderReturnsCustomerNotFoundException()
 
-        val job = launch { billingService.init() }
-        job.join()
+        billingService.init()
 
-        verify(exactly = 1) { customerService.fetchAll() }
+        coVerify(exactly = 1) { customerService.initCustomerPagesChannel(any()) }
         verify(exactly = 2) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = 3) { paymentProvider.charge(any()) }
         verify(exactly = 2) { invoiceService.updatePaidInvoice(any()) }
-        confirmVerified(paymentProvider, invoiceService)
+        confirmVerified(customerService, invoiceService, customerService)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `will skip user invoice when CurrencyMismatchException raised`() = runTest {
+        expectCustomers()
+        expectInvoicesForCustomers()
+        expectInvoiceStatusUpdated()
         expectPaymentProviderReturnsCurrencyMismatchException()
 
-        val job = launch { billingService.init() }
-        job.join()
+        billingService.init()
 
-        verify(exactly = 1) { customerService.fetchAll() }
+        coVerify(exactly = 1) { customerService.initCustomerPagesChannel(any()) }
         verify(exactly = 2) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = 4) { paymentProvider.charge(any()) }
         verify(exactly = 3) { invoiceService.updatePaidInvoice(any()) }
-        confirmVerified(paymentProvider, invoiceService)
+        confirmVerified(customerService, invoiceService, customerService)
     }
 
-    private fun expectInvoiceStatusUpdated() {
-        every { invoiceService.updatePaidInvoice(any()) } just Runs
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun TestScope.expectCustomers() {
+        coEvery { customerService.initCustomerPagesChannel(any()) } answers {
+            val channel = firstArg<Channel<Customer>>()
+            launch {
+                channel.send(Customer(CUSTOMER_ID1, Currency.EUR))
+                channel.send(Customer(CUSTOMER_ID2, Currency.EUR))
+                channel.close()
+            }
+        }
     }
 
-    private fun expectCustomersAndInvoices() {
-        every { customerService.fetchAll() } returns
-                listOf(
-                    Customer(CUSTOMER_ID1, Currency.EUR),
-                    Customer(CUSTOMER_ID2, Currency.EUR)
-                )
+    private fun expectInvoicesForCustomers() {
         every { invoiceService.fetchPendingInvoicesByCustomerId(CUSTOMER_ID1) } returns
                 listOf(
                     Invoice(1, CUSTOMER_ID1, Money(BigDecimal.valueOf(AMOUNT), Currency.EUR), InvoiceStatus.PENDING),
                     Invoice(2, CUSTOMER_ID1, Money(BigDecimal.valueOf(AMOUNT), Currency.EUR), InvoiceStatus.PENDING)
                 )
+
         every { invoiceService.fetchPendingInvoicesByCustomerId(CUSTOMER_ID2) } returns
                 listOf(
                     Invoice(3, CUSTOMER_ID2, Money(BigDecimal.valueOf(AMOUNT), Currency.EUR), InvoiceStatus.PENDING),
                     Invoice(4, CUSTOMER_ID2, Money(BigDecimal.valueOf(AMOUNT), Currency.EUR), InvoiceStatus.PENDING)
                 )
+    }
+
+    private fun expectInvoiceStatusUpdated() {
+        every { invoiceService.updatePaidInvoice(any()) } just Runs
     }
 
     private fun expectPaymentProviderChargesInvoices() {

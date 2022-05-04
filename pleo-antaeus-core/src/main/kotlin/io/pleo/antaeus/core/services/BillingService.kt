@@ -13,6 +13,9 @@ import io.pleo.antaeus.core.exceptions.NetworkException
 import io.pleo.antaeus.core.external.PaymentProvider
 import io.pleo.antaeus.models.Customer
 import io.pleo.antaeus.models.Invoice
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import mu.KotlinLogging
 
 private val logger = KotlinLogging.logger {}
@@ -34,18 +37,21 @@ class BillingService(
     /**
      * Stats the billing process
      */
-    suspend fun init()  {
-        val customers = customerService.fetchAll()
-        customers.forEach customer@{ customer ->
-            invoiceService.fetchPendingInvoicesByCustomerId(customer.id).forEach invoices@{ invoice ->
-                try {
-                    processInvoice(customer, invoice)
-                } catch (e: CustomerNotFoundException) {
-                    logger.error { "Error processing invoice ${invoice.id}: $e" }
-                    return@customer
-                } catch (e: CurrencyMismatchException) {
-                    logger.error { "Error processing invoice ${invoice.id}: $e" }
-                    return@invoices
+    suspend fun init() = coroutineScope {
+        val customersChannel = Channel<Customer>()
+        launch { customerService.initCustomerPagesChannel(customersChannel) }
+        for (customer in customersChannel) {
+            launch {
+                for (invoice in invoiceService.fetchPendingInvoicesByCustomerId(customer.id)) {
+                    try {
+                        processInvoice(customer, invoice)
+                    } catch (e: CurrencyMismatchException) {
+                        logger.error { "Error processing invoice ${invoice.id}: $e" }
+                        continue
+                    } catch (e: CustomerNotFoundException) {
+                        logger.error { "Error processing invoice ${invoice.id}: $e" }
+                        break
+                    }
                 }
             }
         }

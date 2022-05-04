@@ -15,6 +15,8 @@ import io.pleo.antaeus.models.Money
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 
+private const val LIMIT = 50
+
 class AntaeusDal(private val db: Database) {
     fun fetchInvoice(id: Int): Invoice? {
         // transaction(db) runs the internal query as a new database transaction.
@@ -91,6 +93,16 @@ class AntaeusDal(private val db: Database) {
         return transaction(db) {
             InvoiceTable.update({ InvoiceTable.id eq invoice.id })
             { it[status] = newStatus.toString() }
+        }
+    }
+
+    fun fetchCustomersPage(idMarker: Int): List<Customer> {
+        return transaction(db) {
+            CustomerTable
+                .select { CustomerTable.id greater idMarker}
+                .orderBy(CustomerTable.id to SortOrder.ASC)
+                .limit(LIMIT)
+                .map { it.toCustomer() }
         }
     }
 }
