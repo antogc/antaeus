@@ -23,8 +23,8 @@ class InvoiceService(private val dal: AntaeusDal) {
         return dal.fetchPendingInvoicesByCustomerId(id)
     }
 
-    fun updatePaidInvoice(invoice: Invoice) {
-        val update = dal.updateInvoice(invoice, InvoiceStatus.PAID)
+    fun updateInvoiceStatus(invoice: Invoice, status: InvoiceStatus) {
+        val update = dal.updateInvoice(invoice, status)
         if (update != 1) {
             throw InvoiceNotUpdatedException(invoice)
         }

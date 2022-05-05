@@ -35,7 +35,7 @@ class InvoiceServiceTest {
         expectInvoiceIsNotUpdated()
 
         assertThrows<InvoiceNotUpdatedException> {
-            invoiceService.updatePaidInvoice(invoice)
+            invoiceService.updateInvoiceStatus(invoice, InvoiceStatus.PAID)
         }
 
         verify { dal.updateInvoice(invoice, InvoiceStatus.PAID) }

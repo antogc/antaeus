@@ -53,10 +53,10 @@ internal class BillingServiceTest {
         verify(exactly = expectedNextPageCalls) { customerPageFetcher.nextPage() }
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceCharged) { paymentProvider.charge(any()) }
-        verify(exactly = expectedInvoiceCharged) { invoiceService.updatePaidInvoice(any()) }
+        verify(exactly = expectedInvoiceCharged) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
         verify(exactly = expectedInvoiceCharged) { notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, any(), any()) }
         verify(exactly = expectedInvoiceCharged) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
-        confirmVerified(customerService, invoiceService, customerService, notificationService, customerPageFetcher)
+        confirmVerified(customerService, invoiceService, customerService, customerPageFetcher)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -78,7 +78,7 @@ internal class BillingServiceTest {
         verify(exactly = expectedNextPageCalls) { customerPageFetcher.nextPage() }
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceProcessed) { paymentProvider.charge(any()) }
-        verify(exactly = expectedInvoiceProcessed) { invoiceService.updatePaidInvoice(any()) }
+        verify(exactly = expectedInvoiceProcessed) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
         confirmVerified(customerService, invoiceService, customerService, customerPageFetcher)
     }
 
@@ -95,7 +95,7 @@ internal class BillingServiceTest {
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) } //4 + 1 retry
-        verify(exactly = expectedUpdateInvoices) { invoiceService.updatePaidInvoice(any()) }
+        verify(exactly = expectedUpdateInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
         verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
         confirmVerified(invoiceService, paymentProvider)
     }
@@ -113,11 +113,11 @@ internal class BillingServiceTest {
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
-        verify(exactly = expectedUpdateInvoices) { invoiceService.updatePaidInvoice(any()) }
+        verify(exactly = expectedUpdateInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
         verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
         verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, any(), any()) }
         verify(exactly = 1) { notificationService.notifyEvent(EventStatus.CUSTOMER_NOT_FOUND, any(), any()) }
-        confirmVerified(invoiceService, paymentProvider, notificationService)
+        confirmVerified(invoiceService, paymentProvider)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -133,11 +133,11 @@ internal class BillingServiceTest {
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
-        verify(exactly = expectedUpdateInvoices) { invoiceService.updatePaidInvoice(any()) }
+        verify(exactly = expectedUpdateInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
         verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, any(), any()) }
         verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
         verify(exactly = 1) { notificationService.notifyEvent(EventStatus.CURRENCY_MISMATCH, any(), any()) }
-        confirmVerified(invoiceService, paymentProvider, notificationService)
+        confirmVerified(invoiceService, paymentProvider)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -156,11 +156,11 @@ internal class BillingServiceTest {
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
-        verify(exactly = expectedInvoiceUpdateCalls) { invoiceService.updatePaidInvoice(any()) }
+        verify(exactly = expectedInvoiceUpdateCalls) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
         verify(exactly = expectedChargedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, any(), any()) }
         verify(exactly = expectedUpdatedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
         verify(exactly = 1) { notificationService.notifyEvent(EventStatus.INVOICE_NOT_UPDATED, any(), any()) }
-        confirmVerified(invoiceService, paymentProvider, notificationService)
+        confirmVerified(invoiceService, paymentProvider)
     }
 
     private fun expectOnePageOfCustomers() {
@@ -190,11 +190,11 @@ internal class BillingServiceTest {
     }
 
     private fun expectInvoiceStatusUpdated() {
-        every { invoiceService.updatePaidInvoice(any()) } just Runs
+        every { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) } just Runs
     }
 
     private fun expectInvoiceStatusNotUpdated() {
-        every { invoiceService.updatePaidInvoice(any()) } throws
+        every { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) } throws
                 InvoiceNotUpdatedException(mockk() { every { id } returns  1 }) andThen Unit
 
     }

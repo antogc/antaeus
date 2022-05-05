@@ -3,7 +3,7 @@ package io.pleo.antaeus.core.services
 import com.github.michaelbull.retry.ContinueRetrying
 import com.github.michaelbull.retry.StopRetrying
 import com.github.michaelbull.retry.policy.RetryPolicy
-import com.github.michaelbull.retry.policy.constantDelay
+import com.github.michaelbull.retry.policy.binaryExponentialBackoff
 import com.github.michaelbull.retry.policy.plus
 import com.github.michaelbull.retry.retry
 import io.pleo.antaeus.core.exceptions.CurrencyMismatchException
@@ -13,10 +13,13 @@ import io.pleo.antaeus.core.exceptions.NetworkException
 import io.pleo.antaeus.core.external.PaymentProvider
 import io.pleo.antaeus.models.Customer
 import io.pleo.antaeus.models.Invoice
+import io.pleo.antaeus.models.InvoiceStatus
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.channels.consumeEach
 import kotlinx.coroutines.channels.produce
 import mu.KotlinLogging
+import java.util.concurrent.atomic.AtomicBoolean
 
 private val logger = KotlinLogging.logger {}
 val retryPolicy: RetryPolicy<Throwable> = {
@@ -27,7 +30,8 @@ val retryPolicy: RetryPolicy<Throwable> = {
         StopRetrying
     }
 }
-private const val RETRY_DELAY = 1000L
+private const val RETRY_BASE = 10L
+private const val RETRY_MAX = 10L
 private const val CHANNEL_MAX_LIMIT = 50
 
 class BillingService(
@@ -37,26 +41,37 @@ class BillingService(
     private val notificationService: NotificationService
 ) {
 
+    private var isRunningLock: AtomicBoolean = AtomicBoolean(false)
+    val isRunning: Boolean
+        get() = isRunningLock.get()
+
     /**
      * Starts the billing process
      */
     suspend fun initBillingProcess() = coroutineScope {
-        val customersChannel = createCustomersChannel()
-        for (customer in customersChannel) {
-            launch(Dispatchers.IO) {
-                for (invoice in invoiceService.fetchPendingInvoicesByCustomerId(customer.id)) {
-                    try {
-                        processInvoice(customer, invoice)
-                    } catch (e: CurrencyMismatchException) {
-                        notifyError(e, customer, invoice)
-                        continue
-                    } catch (e: CustomerNotFoundException) {
-                        notifyError(e, customer, invoice)
-                        break
+        isRunningLock.set(true)
+        notificationService.notifyEvent(EventStatus.BILLING_PROCESS_STARTED)
+        val jobs = mutableListOf<Job>()
+        createCustomersChannel().consumeEach { customer ->
+            jobs.add(
+                launch(Dispatchers.IO) {
+                    for (invoice in invoiceService.fetchPendingInvoicesByCustomerId(customer.id)) {
+                        try {
+                            processInvoice(customer, invoice)
+                        } catch (e: CurrencyMismatchException) {
+                            notifyError(e, customer, invoice)
+                            continue
+                        } catch (e: CustomerNotFoundException) {
+                            notifyError(e, customer, invoice)
+                            break
+                        }
                     }
                 }
-            }
+            )
         }
+        jobs.joinAll()
+        isRunningLock.set(false)
+        notificationService.notifyEvent(EventStatus.BILLING_PROCESS_FINISHED)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -81,7 +96,7 @@ class BillingService(
 
     private suspend fun processInvoiceWithRetry(invoice: Invoice): Boolean {
         var processed: Boolean
-        retry(retryPolicy  + constantDelay(RETRY_DELAY)) {
+        retry(retryPolicy  + binaryExponentialBackoff(base = RETRY_BASE, max = RETRY_MAX)) {
             processed = paymentProvider.charge(invoice)
         }
         return processed
@@ -89,9 +104,7 @@ class BillingService(
 
     private fun updateInvoice(customer: Customer, invoice: Invoice) {
         try {
-            //TODO retry
-            //TODO improve method to provide status
-            invoiceService.updatePaidInvoice(invoice)
+            invoiceService.updateInvoiceStatus(invoice, InvoiceStatus.PAID)
             notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, customer, invoice)
         } catch (e: InvoiceNotUpdatedException) {
             notifyError(e, customer, invoice)
@@ -110,7 +123,7 @@ class BillingService(
             }
             EventStatus.INSUFFICIENT_FUNDS -> {
                 notificationService.notifyEvent(EventStatus.INSUFFICIENT_FUNDS, customer, invoice)
-                logger.warn { "Insufficient funds for customer ${customer.id} and invoice ${invoice.id}" }
+                logger.debug { "Insufficient funds for customer ${customer.id} and invoice ${invoice.id}" }
             }
             else -> {}
         }
