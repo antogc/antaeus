@@ -3,6 +3,7 @@ package io.pleo.antaeus.core.services
 import io.mockk.*
 import io.pleo.antaeus.core.exceptions.CurrencyMismatchException
 import io.pleo.antaeus.core.exceptions.CustomerNotFoundException
+import io.pleo.antaeus.core.exceptions.InvoiceNotUpdatedException
 import io.pleo.antaeus.core.exceptions.NetworkException
 import io.pleo.antaeus.core.external.PaymentProvider
 import io.pleo.antaeus.models.*
@@ -23,13 +24,14 @@ internal class BillingServiceTest {
     private var paymentProvider = mockk<PaymentProvider>()
     private var customerService = mockk<CustomerService>()
     private var invoiceService = mockk<InvoiceService>()
+    private var notificationService = mockk<NotificationService>(relaxed = true)
     private var customerPageFetcher = mockk<CustomersPageFetcher>()
 
     private lateinit var billingService: BillingService
 
     @BeforeEach
     fun setup() {
-        billingService = BillingService(paymentProvider, customerService, invoiceService)
+        billingService = BillingService(paymentProvider, customerService, invoiceService, notificationService)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -52,7 +54,9 @@ internal class BillingServiceTest {
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceCharged) { paymentProvider.charge(any()) }
         verify(exactly = expectedInvoiceCharged) { invoiceService.updatePaidInvoice(any()) }
-        confirmVerified(customerService, invoiceService, customerService, customerPageFetcher)
+        verify(exactly = expectedInvoiceCharged) { notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, any(), any()) }
+        verify(exactly = expectedInvoiceCharged) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
+        confirmVerified(customerService, invoiceService, customerService, notificationService, customerPageFetcher)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -78,63 +82,85 @@ internal class BillingServiceTest {
         confirmVerified(customerService, invoiceService, customerService, customerPageFetcher)
     }
 
-
    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `will retry payments when NetworkException is raised`() = runTest {
-        expectOnePageOfCustomers()
-        expectInvoicesForCustomers(CUSTOMER_ID1..CUSTOMER_ID2)
-        expectInvoiceStatusUpdated()
-        expectPaymentProviderReturnsExceptionTemporally()
+        expectOnePageOfCustomersAndInvoicesScenario()
+        expectPaymentProviderThrowsExceptionTemporally()
         val expectedFetchInvoiceByCustomerCalls = 2 //2 customers
         val expectedInvoiceChargedCalls = 5 //2 customer with 2 invoices + 1 retry
-        val expectedInvoiceUpdateCalls = 4 //2 customer with 2 invoices
+        val expectedUpdateInvoices = 4 //2 customer with 2 invoices
 
         billingService.initBillingProcess()
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) } //4 + 1 retry
-        verify(exactly = expectedInvoiceUpdateCalls) { invoiceService.updatePaidInvoice(any()) }
+        verify(exactly = expectedUpdateInvoices) { invoiceService.updatePaidInvoice(any()) }
+        verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
         confirmVerified(invoiceService, paymentProvider)
     }
-
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `will skip user customer when CustomerNotFoundException raised`() = runTest {
-        expectOnePageOfCustomers()
-        expectInvoicesForCustomers(CUSTOMER_ID1..CUSTOMER_ID2)
-        expectInvoiceStatusUpdated()
-        expectPaymentProviderReturnsCustomerNotFoundException()
+        expectOnePageOfCustomersAndInvoicesScenario()
+        expectPaymentProviderThrowsCustomerNotFoundException()
         val expectedFetchInvoiceByCustomerCalls = 2 //2 customers
         val expectedInvoiceChargedCalls = 3 //2 customer but first one not found: 1 failed call for the first + 2 correct for the second
-        val expectedInvoiceUpdateCalls = 2 //2 customer with 2 invoices, but first customer not found
+        val expectedUpdateInvoices = 2 //2 customer with 2 invoices, but first customer not found
 
         billingService.initBillingProcess()
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
-        verify(exactly = expectedInvoiceUpdateCalls) { invoiceService.updatePaidInvoice(any()) }
-        confirmVerified(invoiceService, paymentProvider)
+        verify(exactly = expectedUpdateInvoices) { invoiceService.updatePaidInvoice(any()) }
+        verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
+        verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, any(), any()) }
+        verify(exactly = 1) { notificationService.notifyEvent(EventStatus.CUSTOMER_NOT_FOUND, any(), any()) }
+        confirmVerified(invoiceService, paymentProvider, notificationService)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `will skip user invoice when CurrencyMismatchException raised`() = runTest {
-        expectOnePageOfCustomers()
-        expectInvoicesForCustomers(CUSTOMER_ID1..CUSTOMER_ID2)
-        expectInvoiceStatusUpdated()
-        expectPaymentProviderReturnsCurrencyMismatchException()
+        expectOnePageOfCustomersAndInvoicesScenario()
+        expectPaymentProviderThrowsCurrencyMismatchException()
         val expectedFetchInvoiceByCustomerCalls = 2 //2 customers
         val expectedInvoiceChargedCalls = 4 //2 customer 2 invoices each one
-        val expectedInvoiceUpdateCalls = 3 //2 customer with 2 invoices, but first invoice was not updated
+        val expectedUpdateInvoices = 3 //2 customer with 2 invoices, but first invoice was not updated
+
+        billingService.initBillingProcess()
+
+        verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
+        verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
+        verify(exactly = expectedUpdateInvoices) { invoiceService.updatePaidInvoice(any()) }
+        verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, any(), any()) }
+        verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
+        verify(exactly = 1) { notificationService.notifyEvent(EventStatus.CURRENCY_MISMATCH, any(), any()) }
+        confirmVerified(invoiceService, paymentProvider, notificationService)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `will send a notification when invoice not update before charged`() = runTest {
+        expectOnePageOfCustomersAndInvoicesScenario()
+        expectPaymentProviderChargesInvoices()
+        expectInvoiceStatusNotUpdated()
+        val expectedFetchInvoiceByCustomerCalls = 2 //2 customers
+        val expectedInvoiceChargedCalls = 4 //2 customer 2 invoices each one
+        val expectedInvoiceUpdateCalls = 4 //2 customer 2 invoices each one
+        val expectedChargedInvoices = 4 //2 customer with 2 invoices
+        val expectedUpdatedInvoices = 3 //2 customer with 2 invoices, but first invoice was not updated
 
         billingService.initBillingProcess()
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
         verify(exactly = expectedInvoiceUpdateCalls) { invoiceService.updatePaidInvoice(any()) }
-        confirmVerified(invoiceService, paymentProvider)
+        verify(exactly = expectedChargedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, any(), any()) }
+        verify(exactly = expectedUpdatedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
+        verify(exactly = 1) { notificationService.notifyEvent(EventStatus.INVOICE_NOT_UPDATED, any(), any()) }
+        confirmVerified(invoiceService, paymentProvider, notificationService)
     }
 
     private fun expectOnePageOfCustomers() {
@@ -167,19 +193,31 @@ internal class BillingServiceTest {
         every { invoiceService.updatePaidInvoice(any()) } just Runs
     }
 
+    private fun expectInvoiceStatusNotUpdated() {
+        every { invoiceService.updatePaidInvoice(any()) } throws
+                InvoiceNotUpdatedException(mockk() { every { id } returns  1 }) andThen Unit
+
+    }
+
+    private fun expectOnePageOfCustomersAndInvoicesScenario() {
+        expectOnePageOfCustomers()
+        expectInvoicesForCustomers(CUSTOMER_ID1..CUSTOMER_ID2)
+        expectInvoiceStatusUpdated()
+    }
+
     private fun expectPaymentProviderChargesInvoices() {
         every { paymentProvider.charge(any()) } returns true
     }
 
-    private fun expectPaymentProviderReturnsExceptionTemporally() {
+    private fun expectPaymentProviderThrowsExceptionTemporally() {
         every { paymentProvider.charge(any()) } throws NetworkException() andThen true
     }
 
-    private fun expectPaymentProviderReturnsCustomerNotFoundException() {
+    private fun expectPaymentProviderThrowsCustomerNotFoundException() {
         every { paymentProvider.charge(any()) } throws CustomerNotFoundException(CUSTOMER_ID1) andThen true
     }
 
-    private fun expectPaymentProviderReturnsCurrencyMismatchException() {
+    private fun expectPaymentProviderThrowsCurrencyMismatchException() {
         every { paymentProvider.charge(any()) } throws CurrencyMismatchException(1, 1) andThen true
     }
 }

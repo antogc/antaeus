@@ -154,6 +154,26 @@ Time spent: 6 hours
 
 ### Improvements
 
+#### Notification service
+
+In systems like Anteus, where transactions (payments in that case) are capital, is always a good idea to keep an event log, 
+where all events in the systems are registered. Furthermore, the system should be able to proceed depending on the kind of event, 
+for instance:
+* by sending an email to customer when an invoice has been charged
+* by raising an alert in case of error. 
+
+Think of the case where an Invoice is charged but due to an error in the db the status is not updated. In that case, the notification 
+service should alert system administrators, who should fix the issue, in that case, by updating manually the invoice.
+Given that the process is going to be executed once per month, it should be enough time to fix all the issues. Anyway, we have 
+to be aware that we speak about a manual process, and hence, error prone. If the payment provider can not ensure that the
+same invoice can not be charged twice, new countermeasures we be implemented.  
+
+I have provided just a dummy implementation for the notification service, as I consider is out of the challenge purpose. 
+Regarding its real design, a few ideas: 
+* I would consider using a NO SQL db to store events logs. 
+* Furthermore, we could take advantage of the service to generate metrics about the system. Those metrics could be gathered by a monitoring system, for instance Prometheus + Grafana
+
+Time spent: 2 hours
 
 
 

@@ -11,6 +11,7 @@ import getPaymentProvider
 import io.pleo.antaeus.core.services.BillingService
 import io.pleo.antaeus.core.services.CustomerService
 import io.pleo.antaeus.core.services.InvoiceService
+import io.pleo.antaeus.core.services.NotificationService
 import io.pleo.antaeus.data.AntaeusDal
 import io.pleo.antaeus.data.CustomerTable
 import io.pleo.antaeus.data.InvoiceTable
@@ -61,10 +62,12 @@ fun main() = runBlocking {
     // Create core services
     val invoiceService = InvoiceService(dal = dal)
     val customerService = CustomerService(dal = dal)
+    val notificationService = NotificationService()
     val billingService = BillingService(
         paymentProvider = paymentProvider,
         invoiceService = invoiceService,
-        customerService = customerService
+        customerService = customerService,
+        notificationService = notificationService
     )
     launch { billingService.initBillingProcess() }
 

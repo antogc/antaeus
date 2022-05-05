@@ -33,11 +33,12 @@ private const val CHANNEL_MAX_LIMIT = 50
 class BillingService(
     private val paymentProvider: PaymentProvider,
     private val customerService: CustomerService,
-    private val invoiceService: InvoiceService
+    private val invoiceService: InvoiceService,
+    private val notificationService: NotificationService
 ) {
 
     /**
-     * Stats the billing process
+     * Starts the billing process
      */
     suspend fun initBillingProcess() = coroutineScope {
         val customersChannel = createCustomersChannel()
@@ -47,10 +48,10 @@ class BillingService(
                     try {
                         processInvoice(customer, invoice)
                     } catch (e: CurrencyMismatchException) {
-                        logger.error { "Error processing invoice ${invoice.id}: $e" }
+                        notifyError(e, customer, invoice)
                         continue
                     } catch (e: CustomerNotFoundException) {
-                        logger.error { "Error processing invoice ${invoice.id}: $e" }
+                        notifyError(e, customer, invoice)
                         break
                     }
                 }
@@ -58,6 +59,7 @@ class BillingService(
         }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun CoroutineScope.createCustomersChannel(): ReceiveChannel<Customer> = produce(capacity = CHANNEL_MAX_LIMIT) {
         val pageFetcher = customerService.getPageFetcher()
         while (pageFetcher.hasNext()) {
@@ -66,26 +68,14 @@ class BillingService(
                 send(it)
             }
         }
-        //close()
     }
 
     private suspend fun processInvoice(customer: Customer, invoice: Invoice) {
-        val processed = processInvoiceWithRetry(invoice)
-        if (processed) {
-            updateInvoice(invoice)
-            logger.info { "Customer ${customer.id}, invoice ${invoice.id} processed" }
+        if (processInvoiceWithRetry(invoice)) {
+            notifyEvent(EventStatus.INVOICE_CHARGED, customer, invoice)
+            updateInvoice(customer, invoice)
         } else {
-            logger.info { "Customer ${customer.id}, invoice ${invoice.id} NOT charged!" }
-        }
-    }
-
-    private fun updateInvoice(invoice: Invoice) {
-        try {
-            //TODO retry
-            invoiceService.updatePaidInvoice(invoice)
-        } catch (e: InvoiceNotUpdatedException) {
-            //TODO notificationService.notify(invoice.id, ERROR.PAID_)
-            logger.error { "Invoice with id ${invoice.id} was not updated!" }
+            notifyEvent(EventStatus.INSUFFICIENT_FUNDS, customer, invoice)
         }
     }
 
@@ -96,5 +86,52 @@ class BillingService(
         }
         return processed
     }
+
+    private fun updateInvoice(customer: Customer, invoice: Invoice) {
+        try {
+            //TODO retry
+            //TODO improve method to provide status
+            invoiceService.updatePaidInvoice(invoice)
+            notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, customer, invoice)
+        } catch (e: InvoiceNotUpdatedException) {
+            notifyError(e, customer, invoice)
+        }
+    }
+
+    private fun notifyEvent(status: EventStatus, customer: Customer, invoice: Invoice) {
+        when (status) {
+            EventStatus.INVOICE_CHARGED -> {
+                notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, customer, invoice)
+                logger.debug { "Invoice charged for customer ${customer.id} and id ${invoice.id}" }
+            }
+            EventStatus.INVOICE_UPDATED -> {
+                notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, customer, invoice)
+                logger.debug { "Invoice updated customer ${customer.id} and id ${invoice.id} " }
+            }
+            EventStatus.INSUFFICIENT_FUNDS -> {
+                notificationService.notifyEvent(EventStatus.INSUFFICIENT_FUNDS, customer, invoice)
+                logger.warn { "Insufficient funds for customer ${customer.id} and invoice ${invoice.id}" }
+            }
+            else -> {}
+        }
+    }
+
+    private fun notifyError(e: Throwable, customer: Customer, invoice: Invoice?) {
+        when (e) {
+            is CustomerNotFoundException -> {
+                notificationService.notifyEvent(EventStatus.CUSTOMER_NOT_FOUND, customer)
+                logger.error { "Customer not found ${customer.id}: $e" }
+            }
+            is CurrencyMismatchException -> {
+                logger.error { "Error processing invoice ${invoice?.id}: $e" }
+                notificationService.notifyEvent(EventStatus.CURRENCY_MISMATCH, customer, invoice)
+            }
+            is InvoiceNotUpdatedException -> {
+                notificationService.notifyEvent(EventStatus.INVOICE_NOT_UPDATED, customer, invoice)
+                logger.error { "Invoice with id ${invoice?.id} was not updated!" }
+            }
+        }
+    }
+
 }
 
