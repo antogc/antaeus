@@ -83,6 +83,22 @@ class AntaeusRest(
                                 it.json("Process launched")
                             }
                         }
+
+                        post("/invoices/:id") {
+                            // URL: /rest/v1/payments/invoices/{:id}
+                            if (billingService.isRunning) {
+                                it.status(405)
+                                it.json("The billing process is currently been executed")
+                            } else {
+                                GlobalScope.launch {
+                                    val invoice = invoiceService.fetch(it.pathParam("id").toInt())
+                                    val customer = customerService.fetch(invoice.customerId)
+                                    billingService.processCustomerInvoice(customer, invoice)
+                                }
+                                it.status(200)
+                                it.json("Process launched")
+                            }
+                        }
                     }
 
                     path("customers") {

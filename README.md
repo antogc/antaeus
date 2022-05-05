@@ -177,6 +177,19 @@ Time spent: 2 hours
 
 
 
+Implement scheduled task. Idea 2 tipos:
+* scheduled
+  - just once
+
+*Provide extra endpoints
+  - update invoice
+  - update customer
+  - pay invoice
+  - list customer pendings
+
+* Provide configuration file, configurationService  as a file of constants.
+
+
 
 
 

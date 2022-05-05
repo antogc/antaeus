@@ -6,10 +6,7 @@ import com.github.michaelbull.retry.policy.RetryPolicy
 import com.github.michaelbull.retry.policy.binaryExponentialBackoff
 import com.github.michaelbull.retry.policy.plus
 import com.github.michaelbull.retry.retry
-import io.pleo.antaeus.core.exceptions.CurrencyMismatchException
-import io.pleo.antaeus.core.exceptions.CustomerNotFoundException
-import io.pleo.antaeus.core.exceptions.InvoiceNotUpdatedException
-import io.pleo.antaeus.core.exceptions.NetworkException
+import io.pleo.antaeus.core.exceptions.*
 import io.pleo.antaeus.core.external.PaymentProvider
 import io.pleo.antaeus.models.Customer
 import io.pleo.antaeus.models.Invoice
@@ -45,12 +42,29 @@ class BillingService(
     val isRunning: Boolean
         get() = isRunningLock.get()
 
+    suspend fun processCustomerInvoice(customer: Customer, invoice: Invoice) {
+        //TODO event?
+        if (isRunningLock.get()) {
+            throw BillingProcessAlreadyRunning()
+        }
+        processInvoice(customer, invoice)
+    }
+
     /**
      * Starts the billing process
      */
-    suspend fun initBillingProcess() = coroutineScope {
+    suspend fun initBillingProcess()  {
+        if (isRunningLock.get()) {
+            throw BillingProcessAlreadyRunning()
+        }
         isRunningLock.set(true)
         notificationService.notifyEvent(EventStatus.BILLING_PROCESS_STARTED)
+        launchProcess()
+        isRunningLock.set(false)
+        notificationService.notifyEvent(EventStatus.BILLING_PROCESS_FINISHED)
+    }
+
+    private suspend fun launchProcess() = coroutineScope {
         val jobs = mutableListOf<Job>()
         createCustomersChannel().consumeEach { customer ->
             jobs.add(
@@ -70,8 +84,6 @@ class BillingService(
             )
         }
         jobs.joinAll()
-        isRunningLock.set(false)
-        notificationService.notifyEvent(EventStatus.BILLING_PROCESS_FINISHED)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

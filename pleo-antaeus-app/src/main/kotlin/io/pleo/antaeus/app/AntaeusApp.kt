@@ -9,6 +9,7 @@ package io.pleo.antaeus.app
 
 import dev.inmo.krontab.doInfinityTz
 import getPaymentProvider
+import io.pleo.antaeus.core.exceptions.BillingProcessAlreadyRunning
 import io.pleo.antaeus.core.services.*
 import io.pleo.antaeus.data.AntaeusDal
 import io.pleo.antaeus.data.CustomerTable
@@ -80,9 +81,9 @@ fun main() = runBlocking {
     ).run()
 
     doInfinityTz(onePerMonthSchedule) {
-        if (!billingService.isRunning) {
+        try {
             billingService.initBillingProcess()
-        } else {
+        } catch (e: BillingProcessAlreadyRunning) {
             logger.warn { "Billing process already running" }
             notificationService.notifyEvent(EventStatus.BILLING_ALREADY_RUNNING)
         }
