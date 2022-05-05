@@ -61,14 +61,12 @@ fun main() = runBlocking {
     // Create core services
     val invoiceService = InvoiceService(dal = dal)
     val customerService = CustomerService(dal = dal)
-
-    // This is _your_ billing service to be included where you see fit
     val billingService = BillingService(
         paymentProvider = paymentProvider,
         invoiceService = invoiceService,
         customerService = customerService
     )
-    launch { billingService.init() }
+    launch { billingService.initBillingProcess() }
 
     // Create REST web service
     AntaeusRest(

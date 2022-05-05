@@ -93,8 +93,7 @@ Happy hacking 😁!
 ### Initial steps
 
 Initially I just had some basic knowledge about Kotlin, so I decided to take advantage of the challenge to learn Kotlin in depth. 
-The first step, before facing the challenge itself, was indeed learning about Kotlin. 
-I spent about 6-8 hours reading the official documentation, 
+The first step, before facing the challenge itself, was indeed learning about Kotlin. I spent about 6-8 hours reading the official documentation, 
 
 Next step was reading and understanding the challenge purpose. Once that, I reviewed all the code structure and performed some executions to learn about different components and its interactions.
 Even I made a diagram to have a visual about the anteus structure. I spent like on hour on this.
@@ -106,11 +105,11 @@ During the analysis phase I have identified some key points to be aware of:
 * Billing service basic flow. Two possibilities
   * Two nested loops, first to fetch customers, second to fetch pending invoices by customer. 
   * One loop over all pending invoices (sorted by customerId).
-  * I prefer the first one, processing customers in order. This way we will process all the customers pending invoices at the same moment. In case of issues it will be easier to monitor. Furthermore, we will take advantage of the CustomerNotFoundException skipping remaining invoices.
+  * I prefer the first one, processing customers in order. This way we will process all the customers pending invoices at the same moment. In case of issues, it will be easier to monitor. Furthermore, we will take advantage of the CustomerNotFoundException skipping remaining invoices.
 * Each customer invoice is processed individually. That is, the invoice is charged and then updated in the db (status PAID).
   * What if the updating invoice status process fails? The invoice is already processed but the BD does not reflect the status. An initial idea could be implementing a new service that stores those failures to be re-processed again in some moment (like a `dead letter queue`)
 * Assuming a huge amount of Customers, a `pagination` mechanism to get customers would be great.
-* Concurrency. Different customers can be processed in parallel.
+* Asynchronous implementation. Different customers could be processed in an Asynchronous way.
 * Error handling. 
   * NetworkException: retry indefinitely
   * Customer not found exception: log and pass the next customer
@@ -128,30 +127,44 @@ Having in mind the concerns above-mentioned, I made some decisions for the initi
   * No concurrency.
   * Errors on update invoice operation are just logged.
 
-Time spent initial prototype, analysis, design, implementation and tests: 8 hours
+Time spent initial prototype, analysis, design, implementation and tests: 6 hours
 
 ### Second evolution
 
-The main idea for the next evolution was to implement the billing service process in a concurrent way. The idea is to 
-have two different process at the same time, on one side a process fetching customers from the db, and on the other side, 
-the billing process for customer's invoices. 
+The main idea for the next evolution is to implement the billing process in a concurrent way. The idea is to 
+have two different process running at the same time: 
+* A process fetching customers from the db.
+* Another process in charge of processing customer's invoices.
 
-For the `fetch all Customers` process, I will implement a `keyset pagination` mechanism. The idea is to fetch `page by page` 
-from the DB but providing customers `one by one`. For that purpose I will use a Channel.
-* Fetch Customer process: get page by page -> forEach customer in page -> channel.send customer
-* Invoice billing process: channel.receive customer -> get Invoices by customer -> process invoice in a courutine
+For that purpose, I will implement a `producer-consumer` pattern using a `Channel producer`. 
+
+The first component will be the `Channel Producer`, that is going to provide a channel serving customers. 
+The producer will use a new component provided by the customer service, a `customerPageFetcher`, that component is able to 
+get customers pages by page, using `keyset pagination`,  and then the producer will serve customers one by one.
+
+The second component, the `Consumer`, will be in charge of processing invoices for a specific customer, and it's going to use a coroutine for each user.  
 
 Two important questions:
 * Why Keyset pagination? Because it provides better performance than regular offset pagination.
-* Why pagination for customers and no for invoices. Looking at the initial data it seems to me that 
+* Why pagination for customers and no for invoices?. Looking at the initial data it seems to me that 
 the number of customers could be large enough to require a pagination mechanism, I'm not sure the same can happen for invoices.
 Assuming a regular behaviour where invoices are processed periodically, I would not expect too much growth.
 
-Time spent: 4 hours
+Time spent: 6 hours
 
 ### Improvements
 
-Implement scheduled task
-Add a notification service (update invoice issue)
-Provide extra endpoints
-Provide configuration file
+
+
+
+
+
+
+
+
+
+
+
+
+
+

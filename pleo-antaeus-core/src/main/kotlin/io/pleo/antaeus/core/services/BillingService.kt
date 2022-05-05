@@ -13,9 +13,9 @@ import io.pleo.antaeus.core.exceptions.NetworkException
 import io.pleo.antaeus.core.external.PaymentProvider
 import io.pleo.antaeus.models.Customer
 import io.pleo.antaeus.models.Invoice
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.channels.produce
 import mu.KotlinLogging
 
 private val logger = KotlinLogging.logger {}
@@ -27,6 +27,8 @@ val retryPolicy: RetryPolicy<Throwable> = {
         StopRetrying
     }
 }
+private const val RETRY_DELAY = 1000L
+private const val CHANNEL_MAX_LIMIT = 50
 
 class BillingService(
     private val paymentProvider: PaymentProvider,
@@ -37,11 +39,10 @@ class BillingService(
     /**
      * Stats the billing process
      */
-    suspend fun init() = coroutineScope {
-        val customersChannel = Channel<Customer>()
-        launch { customerService.initCustomerPagesChannel(customersChannel) }
+    suspend fun initBillingProcess() = coroutineScope {
+        val customersChannel = createCustomersChannel()
         for (customer in customersChannel) {
-            launch {
+            launch(Dispatchers.IO) {
                 for (invoice in invoiceService.fetchPendingInvoicesByCustomerId(customer.id)) {
                     try {
                         processInvoice(customer, invoice)
@@ -57,6 +58,17 @@ class BillingService(
         }
     }
 
+    private fun CoroutineScope.createCustomersChannel(): ReceiveChannel<Customer> = produce(capacity = CHANNEL_MAX_LIMIT) {
+        val pageFetcher = customerService.getPageFetcher()
+        while (pageFetcher.hasNext()) {
+            val customers = pageFetcher.nextPage()
+            customers.forEach {
+                send(it)
+            }
+        }
+        //close()
+    }
+
     private suspend fun processInvoice(customer: Customer, invoice: Invoice) {
         val processed = processInvoiceWithRetry(invoice)
         if (processed) {
@@ -69,15 +81,17 @@ class BillingService(
 
     private fun updateInvoice(invoice: Invoice) {
         try {
+            //TODO retry
             invoiceService.updatePaidInvoice(invoice)
         } catch (e: InvoiceNotUpdatedException) {
+            //TODO notificationService.notify(invoice.id, ERROR.PAID_)
             logger.error { "Invoice with id ${invoice.id} was not updated!" }
         }
     }
 
     private suspend fun processInvoiceWithRetry(invoice: Invoice): Boolean {
         var processed: Boolean
-        retry(retryPolicy  + constantDelay(10)) {
+        retry(retryPolicy  + constantDelay(RETRY_DELAY)) {
             processed = paymentProvider.charge(invoice)
         }
         return processed

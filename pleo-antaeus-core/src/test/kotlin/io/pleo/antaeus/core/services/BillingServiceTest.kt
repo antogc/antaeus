@@ -7,9 +7,6 @@ import io.pleo.antaeus.core.exceptions.NetworkException
 import io.pleo.antaeus.core.external.PaymentProvider
 import io.pleo.antaeus.models.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -18,12 +15,15 @@ import java.math.BigDecimal
 private const val AMOUNT = 1.0
 private const val CUSTOMER_ID1 = 1
 private const val CUSTOMER_ID2 = 2
+private const val CUSTOMER_ID3 = 3
+private const val CUSTOMER_ID4 = 4
 
 internal class BillingServiceTest {
 
     private var paymentProvider = mockk<PaymentProvider>()
     private var customerService = mockk<CustomerService>()
     private var invoiceService = mockk<InvoiceService>()
+    private var customerPageFetcher = mockk<CustomersPageFetcher>()
 
     private lateinit var billingService: BillingService
 
@@ -34,96 +34,133 @@ internal class BillingServiceTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `will process payments`() = runTest {
-        expectCustomers()
-        expectInvoicesForCustomers()
+    fun `will process payments when there is one customer page`() = runTest {
+        expectOnePageOfCustomers()
+        expectInvoicesForCustomers(CUSTOMER_ID1..CUSTOMER_ID2)
         expectInvoiceStatusUpdated()
         expectPaymentProviderChargesInvoices()
+        val expectedHashNextCalls = 3 //fetcher needs an extra call to verify no more pages
+        val expectedNextPageCalls = 2 //first one with a page, second one empty
+        val expectedFetchInvoiceByCustomerCalls = 2 //2 customers
+        val expectedInvoiceCharged = 4 //each customer with 2 invoices
 
-        billingService.init()
+        billingService.initBillingProcess()
 
-        coVerify(exactly = 1) { customerService.initCustomerPagesChannel(any()) }
-        verify(exactly = 2) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
-        verify(exactly = 4) { paymentProvider.charge(any()) }
-        verify(exactly = 4) { invoiceService.updatePaidInvoice(any()) }
-        confirmVerified(customerService, invoiceService, customerService)
+        verify(exactly = 1) { customerService.getPageFetcher() }
+        verify(exactly = expectedHashNextCalls) { customerPageFetcher.hasNext() }
+        verify(exactly = expectedNextPageCalls) { customerPageFetcher.nextPage() }
+        verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
+        verify(exactly = expectedInvoiceCharged) { paymentProvider.charge(any()) }
+        verify(exactly = expectedInvoiceCharged) { invoiceService.updatePaidInvoice(any()) }
+        confirmVerified(customerService, invoiceService, customerService, customerPageFetcher)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
+    fun `will process payments when there are two customer pages`() = runTest {
+        expectTwoPagesOfCustomers()
+        expectInvoicesForCustomers(CUSTOMER_ID1..CUSTOMER_ID4)
+        expectInvoiceStatusUpdated()
+        expectPaymentProviderChargesInvoices()
+        val expectedHashNextCalls = 4 //fetcher needs an extra call to verify no more pages
+        val expectedNextPageCalls = 3 //2 pages with customers and one empty page
+        val expectedFetchInvoiceByCustomerCalls = 4 //4 customers
+        val expectedInvoiceProcessed = 8 //each customer with 2 invoices
+
+        billingService.initBillingProcess()
+
+        verify(exactly = 1) { customerService.getPageFetcher() }
+        verify(exactly = expectedHashNextCalls) { customerPageFetcher.hasNext() }
+        verify(exactly = expectedNextPageCalls) { customerPageFetcher.nextPage() }
+        verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
+        verify(exactly = expectedInvoiceProcessed) { paymentProvider.charge(any()) }
+        verify(exactly = expectedInvoiceProcessed) { invoiceService.updatePaidInvoice(any()) }
+        confirmVerified(customerService, invoiceService, customerService, customerPageFetcher)
+    }
+
+
+   @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
     fun `will retry payments when NetworkException is raised`() = runTest {
-        expectCustomers()
-        expectInvoicesForCustomers()
+        expectOnePageOfCustomers()
+        expectInvoicesForCustomers(CUSTOMER_ID1..CUSTOMER_ID2)
         expectInvoiceStatusUpdated()
         expectPaymentProviderReturnsExceptionTemporally()
+        val expectedFetchInvoiceByCustomerCalls = 2 //2 customers
+        val expectedInvoiceChargedCalls = 5 //2 customer with 2 invoices + 1 retry
+        val expectedInvoiceUpdateCalls = 4 //2 customer with 2 invoices
 
-        billingService.init()
+        billingService.initBillingProcess()
 
-        coVerify(exactly = 1) { customerService.initCustomerPagesChannel(any()) }
-        verify(exactly = 2) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
-        verify(exactly = 5) { paymentProvider.charge(any()) } //4 + 1 retry
-        verify(exactly = 4) { invoiceService.updatePaidInvoice(any()) }
-        confirmVerified(customerService, invoiceService, customerService)
+        verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
+        verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) } //4 + 1 retry
+        verify(exactly = expectedInvoiceUpdateCalls) { invoiceService.updatePaidInvoice(any()) }
+        confirmVerified(invoiceService, paymentProvider)
     }
+
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `will skip user customer when CustomerNotFoundException raised`() = runTest {
-        expectCustomers()
-        expectInvoicesForCustomers()
+        expectOnePageOfCustomers()
+        expectInvoicesForCustomers(CUSTOMER_ID1..CUSTOMER_ID2)
         expectInvoiceStatusUpdated()
         expectPaymentProviderReturnsCustomerNotFoundException()
+        val expectedFetchInvoiceByCustomerCalls = 2 //2 customers
+        val expectedInvoiceChargedCalls = 3 //2 customer but first one not found: 1 failed call for the first + 2 correct for the second
+        val expectedInvoiceUpdateCalls = 2 //2 customer with 2 invoices, but first customer not found
 
-        billingService.init()
+        billingService.initBillingProcess()
 
-        coVerify(exactly = 1) { customerService.initCustomerPagesChannel(any()) }
-        verify(exactly = 2) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
-        verify(exactly = 3) { paymentProvider.charge(any()) }
-        verify(exactly = 2) { invoiceService.updatePaidInvoice(any()) }
-        confirmVerified(customerService, invoiceService, customerService)
+        verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
+        verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
+        verify(exactly = expectedInvoiceUpdateCalls) { invoiceService.updatePaidInvoice(any()) }
+        confirmVerified(invoiceService, paymentProvider)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `will skip user invoice when CurrencyMismatchException raised`() = runTest {
-        expectCustomers()
-        expectInvoicesForCustomers()
+        expectOnePageOfCustomers()
+        expectInvoicesForCustomers(CUSTOMER_ID1..CUSTOMER_ID2)
         expectInvoiceStatusUpdated()
         expectPaymentProviderReturnsCurrencyMismatchException()
+        val expectedFetchInvoiceByCustomerCalls = 2 //2 customers
+        val expectedInvoiceChargedCalls = 4 //2 customer 2 invoices each one
+        val expectedInvoiceUpdateCalls = 3 //2 customer with 2 invoices, but first invoice was not updated
 
-        billingService.init()
+        billingService.initBillingProcess()
 
-        coVerify(exactly = 1) { customerService.initCustomerPagesChannel(any()) }
-        verify(exactly = 2) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
-        verify(exactly = 4) { paymentProvider.charge(any()) }
-        verify(exactly = 3) { invoiceService.updatePaidInvoice(any()) }
-        confirmVerified(customerService, invoiceService, customerService)
+        verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
+        verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
+        verify(exactly = expectedInvoiceUpdateCalls) { invoiceService.updatePaidInvoice(any()) }
+        confirmVerified(invoiceService, paymentProvider)
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private fun TestScope.expectCustomers() {
-        coEvery { customerService.initCustomerPagesChannel(any()) } answers {
-            val channel = firstArg<Channel<Customer>>()
-            launch {
-                channel.send(Customer(CUSTOMER_ID1, Currency.EUR))
-                channel.send(Customer(CUSTOMER_ID2, Currency.EUR))
-                channel.close()
-            }
+    private fun expectOnePageOfCustomers() {
+        every { customerPageFetcher.hasNext() } returns true andThen true andThen false
+        val customerPage = listOf(Customer(CUSTOMER_ID1, Currency.EUR), Customer(CUSTOMER_ID2, Currency.EUR))
+        every { customerPageFetcher.nextPage() } returns customerPage andThen listOf()
+        every { customerService.getPageFetcher() } returns customerPageFetcher
+    }
+
+    private fun expectTwoPagesOfCustomers() {
+        every { customerPageFetcher.hasNext() } returns true andThen true andThen true  andThen false
+        val customerPage1 = listOf(Customer(CUSTOMER_ID1, Currency.EUR), Customer(CUSTOMER_ID2, Currency.EUR))
+        val customerPage2 = listOf(Customer(CUSTOMER_ID3, Currency.EUR), Customer(CUSTOMER_ID4, Currency.EUR))
+        every { customerPageFetcher.nextPage() } returns customerPage1 andThen customerPage2 andThen listOf()
+        every { customerService.getPageFetcher() } returns customerPageFetcher
+    }
+
+    private fun expectInvoicesForCustomers(range: IntRange) {
+        var invoiceId = 1
+        range.forEach {
+            every { invoiceService.fetchPendingInvoicesByCustomerId(it) } returns
+                    listOf(
+                        Invoice(invoiceId++, it, Money(BigDecimal.valueOf(AMOUNT), Currency.EUR), InvoiceStatus.PENDING),
+                        Invoice(invoiceId++, it, Money(BigDecimal.valueOf(AMOUNT), Currency.EUR), InvoiceStatus.PENDING)
+                    )
         }
-    }
-
-    private fun expectInvoicesForCustomers() {
-        every { invoiceService.fetchPendingInvoicesByCustomerId(CUSTOMER_ID1) } returns
-                listOf(
-                    Invoice(1, CUSTOMER_ID1, Money(BigDecimal.valueOf(AMOUNT), Currency.EUR), InvoiceStatus.PENDING),
-                    Invoice(2, CUSTOMER_ID1, Money(BigDecimal.valueOf(AMOUNT), Currency.EUR), InvoiceStatus.PENDING)
-                )
-
-        every { invoiceService.fetchPendingInvoicesByCustomerId(CUSTOMER_ID2) } returns
-                listOf(
-                    Invoice(3, CUSTOMER_ID2, Money(BigDecimal.valueOf(AMOUNT), Currency.EUR), InvoiceStatus.PENDING),
-                    Invoice(4, CUSTOMER_ID2, Money(BigDecimal.valueOf(AMOUNT), Currency.EUR), InvoiceStatus.PENDING)
-                )
     }
 
     private fun expectInvoiceStatusUpdated() {
