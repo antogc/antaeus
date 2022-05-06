@@ -15,7 +15,8 @@ import io.pleo.antaeus.models.Money
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 
-private const val LIMIT = 50
+//it should be provided by the configuration provider
+private const val DB_PAGE_LIMIT = 50
 
 class AntaeusDal(private val db: Database) {
     fun fetchInvoice(id: Int): Invoice? {
@@ -101,7 +102,7 @@ class AntaeusDal(private val db: Database) {
             CustomerTable
                 .select { CustomerTable.id greater idMarker}
                 .orderBy(CustomerTable.id to SortOrder.ASC)
-                .limit(LIMIT)
+                .limit(DB_PAGE_LIMIT)
                 .map { it.toCustomer() }
         }
     }

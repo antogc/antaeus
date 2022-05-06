@@ -6,6 +6,9 @@ import com.github.michaelbull.retry.policy.RetryPolicy
 import com.github.michaelbull.retry.policy.binaryExponentialBackoff
 import com.github.michaelbull.retry.policy.plus
 import com.github.michaelbull.retry.retry
+import io.pleo.antaeus.core.config.CUSTOMERS_CHANNEL_MAX_LIMIT
+import io.pleo.antaeus.core.config.NETWORK_RETRY_BASE
+import io.pleo.antaeus.core.config.NETWORK_RETRY_MAX
 import io.pleo.antaeus.core.exceptions.*
 import io.pleo.antaeus.core.external.PaymentProvider
 import io.pleo.antaeus.models.Customer
@@ -27,9 +30,7 @@ val retryPolicy: RetryPolicy<Throwable> = {
         StopRetrying
     }
 }
-private const val RETRY_BASE = 10L
-private const val RETRY_MAX = 10L
-private const val CHANNEL_MAX_LIMIT = 50
+
 
 class BillingService(
     private val paymentProvider: PaymentProvider,
@@ -104,7 +105,7 @@ class BillingService(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private fun CoroutineScope.createCustomersChannel(): ReceiveChannel<Customer> = produce(capacity = CHANNEL_MAX_LIMIT) {
+    private fun CoroutineScope.createCustomersChannel(): ReceiveChannel<Customer> = produce(capacity = CUSTOMERS_CHANNEL_MAX_LIMIT) {
         val pageFetcher = customerService.getPageFetcher()
         while (pageFetcher.hasNext()) {
             val customers = pageFetcher.nextPage()
@@ -125,7 +126,7 @@ class BillingService(
 
     private suspend fun processInvoiceWithRetry(invoice: Invoice): Boolean {
         var processed: Boolean
-        retry(retryPolicy  + binaryExponentialBackoff(base = RETRY_BASE, max = RETRY_MAX)) {
+        retry(retryPolicy  + binaryExponentialBackoff(base = NETWORK_RETRY_BASE, max = NETWORK_RETRY_MAX)) {
             processed = paymentProvider.charge(invoice)
         }
         return processed
