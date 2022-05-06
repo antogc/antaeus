@@ -7,29 +7,20 @@
 
 package io.pleo.antaeus.app
 
-import dev.inmo.krontab.doInfinityTz
 import getPaymentProvider
-import io.pleo.antaeus.core.exceptions.BillingProcessAlreadyRunning
+import io.pleo.antaeus.core.scheduler.BillingProcessScheduler
 import io.pleo.antaeus.core.services.*
 import io.pleo.antaeus.data.AntaeusDal
 import io.pleo.antaeus.data.CustomerTable
 import io.pleo.antaeus.data.InvoiceTable
 import io.pleo.antaeus.rest.AntaeusRest
-import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.SchemaUtils
-import org.jetbrains.exposed.sql.StdOutSqlLogger
-import org.jetbrains.exposed.sql.addLogger
 import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.transactions.transaction
 import setupInitialData
 import java.io.File
 import java.sql.Connection
 import kotlinx.coroutines.runBlocking
-import mu.KotlinLogging
-
-
-private const val onePerMonthSchedule =  "0 0 0 1 * 0o"
-private val logger = KotlinLogging.logger {}
+import org.jetbrains.exposed.sql.*
 
 fun main() = runBlocking {
     // The tables to create in the database.
@@ -73,6 +64,10 @@ fun main() = runBlocking {
         notificationService = notificationService
     )
 
+    // Create and execute the scheduler process
+    val scheduler = BillingProcessScheduler(billingService, notificationService)
+    scheduler.scheduleProcess()
+
     // Create REST web service
     AntaeusRest(
         invoiceService = invoiceService,
@@ -80,12 +75,4 @@ fun main() = runBlocking {
         billingService = billingService
     ).run()
 
-    doInfinityTz(onePerMonthSchedule) {
-        try {
-            billingService.initBillingProcess()
-        } catch (e: BillingProcessAlreadyRunning) {
-            logger.warn { "Billing process already running" }
-            notificationService.notifyEvent(EventStatus.BILLING_ALREADY_RUNNING)
-        }
-    }
 }
