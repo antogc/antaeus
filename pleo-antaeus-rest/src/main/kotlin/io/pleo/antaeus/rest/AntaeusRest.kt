@@ -6,7 +6,7 @@ package io.pleo.antaeus.rest
 
 import io.javalin.Javalin
 import io.javalin.apibuilder.ApiBuilder.*
-import io.pleo.antaeus.core.exceptions.EntityNotFoundException
+import io.pleo.antaeus.core.exceptions.*
 import io.pleo.antaeus.core.services.BillingService
 import io.pleo.antaeus.core.services.CustomerService
 import io.pleo.antaeus.core.services.InvoiceService
@@ -90,13 +90,29 @@ class AntaeusRest(
                                 it.status(405)
                                 it.json("The billing process is currently been executed")
                             } else {
-                                GlobalScope.launch {
-                                    val invoice = invoiceService.fetch(it.pathParam("id").toInt())
-                                    val customer = customerService.fetch(invoice.customerId)
-                                    billingService.processCustomerInvoice(customer, invoice)
+                                val invoice = invoiceService.fetch(it.pathParam("id").toInt())
+                                val customer = customerService.fetch(invoice.customerId)
+                                try {
+                                    if (billingService.processSingleInvoice(customer, invoice)) {
+                                        it.status(200)
+                                        it.json("Invoice correctly processed")
+                                    } else {
+                                        it.status(200)
+                                        it.json("The invoice cannot be paid. Insufficient funds")
+                                    }
+                                } catch (e : CustomerNotFoundException) {
+                                    it.status(404)
+                                    it.json("The customer owning the invoice was not found. Please contact the administrators")
+                                } catch (e : CurrencyMismatchException) {
+                                    it.status(422)
+                                    it.json("There was an error processing the invoice. The invoice's currency does not match customer one. Please contact the administrators")
+                                } catch (e : NetworkException) {
+                                    it.status(502)
+                                    it.json("There was an temporal error processing the invoice. Please try again in a moment")
+                                } catch (e : InvoiceNotUpdatedException) {
+                                    it.status(500)
+                                    it.json("There was an error updating the invoice. The payment was processed, but the invoice could not be updated in the db. PLease contact administrators.")
                                 }
-                                it.status(200)
-                                it.json("Process launched")
                             }
                         }
                     }

@@ -1,5 +1,7 @@
 package io.pleo.antaeus.core.services
 
+import io.kotest.matchers.booleans.shouldBeFalse
+import io.kotest.matchers.booleans.shouldBeTrue
 import io.mockk.*
 import io.pleo.antaeus.core.exceptions.CurrencyMismatchException
 import io.pleo.antaeus.core.exceptions.CustomerNotFoundException
@@ -163,6 +165,27 @@ internal class BillingServiceTest {
         confirmVerified(invoiceService, paymentProvider)
     }
 
+    @Test
+    fun `will process an invoice manually`()  {
+        val customer = Customer(CUSTOMER_ID1, Currency.EUR)
+        val invoice = Invoice(1, CUSTOMER_ID1, Money(BigDecimal.valueOf(AMOUNT), Currency.EUR), InvoiceStatus.PENDING)
+        expectPaymentProviderChargesInvoices()
+        expectInvoiceStatusUpdated()
+
+        billingService.processSingleInvoice(customer, invoice).shouldBeTrue()
+    }
+
+    @Test
+    fun `will process an invoice manually when customer has not funds then return false`()  {
+        val customer = Customer(CUSTOMER_ID1, Currency.EUR)
+        val invoice = Invoice(1, CUSTOMER_ID1, Money(BigDecimal.valueOf(AMOUNT), Currency.EUR), InvoiceStatus.PENDING)
+        expectPaymentProviderReturnsNoFunds()
+
+        billingService.processSingleInvoice(customer, invoice).shouldBeFalse()
+
+        confirmVerified(invoiceService)
+    }
+
     private fun expectOnePageOfCustomers() {
         every { customerPageFetcher.hasNext() } returns true andThen true andThen false
         val customerPage = listOf(Customer(CUSTOMER_ID1, Currency.EUR), Customer(CUSTOMER_ID2, Currency.EUR))
@@ -196,7 +219,6 @@ internal class BillingServiceTest {
     private fun expectInvoiceStatusNotUpdated() {
         every { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) } throws
                 InvoiceNotUpdatedException(mockk() { every { id } returns  1 }) andThen Unit
-
     }
 
     private fun expectOnePageOfCustomersAndInvoicesScenario() {
@@ -207,6 +229,10 @@ internal class BillingServiceTest {
 
     private fun expectPaymentProviderChargesInvoices() {
         every { paymentProvider.charge(any()) } returns true
+    }
+
+    private fun expectPaymentProviderReturnsNoFunds() {
+        every { paymentProvider.charge(any()) } returns false
     }
 
     private fun expectPaymentProviderThrowsExceptionTemporally() {

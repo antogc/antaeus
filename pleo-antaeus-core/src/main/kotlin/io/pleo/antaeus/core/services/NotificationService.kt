@@ -5,10 +5,10 @@
  *  - sending an alert
  *  - sending an email to the customer
  */
-package io.pleo.antaeus.core.services;
+package io.pleo.antaeus.core.services
 
 import io.pleo.antaeus.models.Customer
-import io.pleo.antaeus.models.Invoice;
+import io.pleo.antaeus.models.Invoice
 import mu.KotlinLogging
 
 private val logger = KotlinLogging.logger {}
@@ -17,6 +17,7 @@ enum class EventStatus {
     BILLING_PROCESS_STARTED,
     BILLING_PROCESS_FINISHED,
     BILLING_ALREADY_RUNNING,
+    MANUAL_INVOICE_UPDATE,
     CURRENCY_MISMATCH,
     CUSTOMER_NOT_FOUND,
     INVOICE_CHARGED,
@@ -61,8 +62,8 @@ class NotificationService {
     private fun registerEvent(status: EventStatus, customer: Customer?, invoice: Invoice?) {
         logger.info {
             "Registering event $status " +
-                    if (customer != null) "- customer ${customer.id}" else "" +
-                            if (invoice != null) "- invoice ${invoice.id}" else ""
+                    (if (customer != null) "- customer ${customer.id}" else " ") +
+                    (if (invoice != null) "- invoice ${invoice.id}" else "")
         }
         //code to send event to the log event system
     }
@@ -70,14 +71,16 @@ class NotificationService {
     private fun sendAlert(status: EventStatus, customer: Customer? = null, invoice: Invoice? = null) {
         logger.warn {
             "Sending alert for event: $status " +
-                    if (customer != null) "- customer ${customer.id}" else "" +
-                            if (invoice != null) "- invoice ${invoice.id}" else ""
+                    (if (customer != null) "- customer ${customer.id} " else " ") +
+                    (if (invoice != null) "- invoice ${invoice.id}" else "")
         }
         //code to email system administrators to fix the issue
     }
 
     private fun sendNotificationToCustomer(status: EventStatus, customer: Customer?, invoice: Invoice? = null) {
-        logger.debug { "Sending notification for event: $status: customer ${customer?.id} ${if (invoice != null) "- invoice ${invoice.id}" else "" }" }
+        logger.debug { "Sending notification for event: $status: customer ${customer?.id} " +
+                if (invoice != null) "- invoice ${invoice.id}" else ""
+        }
         //code to email a customer to notify an event
     }
 }

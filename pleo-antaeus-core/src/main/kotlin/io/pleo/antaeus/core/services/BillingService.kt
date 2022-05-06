@@ -36,54 +36,71 @@ class BillingService(
     private val customerService: CustomerService,
     private val invoiceService: InvoiceService,
     private val notificationService: NotificationService
-) {
+){
 
     private var isRunningLock: AtomicBoolean = AtomicBoolean(false)
     val isRunning: Boolean
         get() = isRunningLock.get()
 
-    suspend fun processCustomerInvoice(customer: Customer, invoice: Invoice) {
-        //TODO event?
-        if (isRunningLock.get()) {
-            throw BillingProcessAlreadyRunning()
+    /**
+     * Process the payment of a specific invoice without error checking
+     */
+    fun processSingleInvoice(customer: Customer, invoice: Invoice): Boolean {
+        checkProcessIsNotRunning()
+        notifyEvent(EventStatus.MANUAL_INVOICE_UPDATE, customer, invoice)
+        return if (paymentProvider.charge(invoice)) {
+            notifyEvent(EventStatus.INVOICE_CHARGED, customer, invoice)
+            invoiceService.updateInvoiceStatus(invoice, InvoiceStatus.PAID)
+            notifyEvent(EventStatus.INVOICE_UPDATED, customer, invoice)
+            true
+        } else {
+            notifyEvent(EventStatus.INSUFFICIENT_FUNDS, customer, invoice)
+            false
         }
-        processInvoice(customer, invoice)
     }
 
     /**
-     * Starts the billing process
+     * Initiates the billing process that is going to process all pending invoices
      */
     suspend fun initBillingProcess()  {
+        checkProcessIsNotRunning()
+        isRunningLock.set(true)
+        launchProcess()
+        isRunningLock.set(false)
+    }
+
+    private fun checkProcessIsNotRunning() {
         if (isRunningLock.get()) {
             throw BillingProcessAlreadyRunning()
         }
-        isRunningLock.set(true)
-        notificationService.notifyEvent(EventStatus.BILLING_PROCESS_STARTED)
-        launchProcess()
-        isRunningLock.set(false)
-        notificationService.notifyEvent(EventStatus.BILLING_PROCESS_FINISHED)
     }
 
     private suspend fun launchProcess() = coroutineScope {
+        notificationService.notifyEvent(EventStatus.BILLING_PROCESS_STARTED)
         val jobs = mutableListOf<Job>()
         createCustomersChannel().consumeEach { customer ->
             jobs.add(
                 launch(Dispatchers.IO) {
-                    for (invoice in invoiceService.fetchPendingInvoicesByCustomerId(customer.id)) {
-                        try {
-                            processInvoice(customer, invoice)
-                        } catch (e: CurrencyMismatchException) {
-                            notifyError(e, customer, invoice)
-                            continue
-                        } catch (e: CustomerNotFoundException) {
-                            notifyError(e, customer, invoice)
-                            break
-                        }
-                    }
+                    processCustomerInvoices(customer)
                 }
             )
         }
         jobs.joinAll()
+        notificationService.notifyEvent(EventStatus.BILLING_PROCESS_FINISHED)
+    }
+
+    private suspend fun processCustomerInvoices(customer: Customer){
+        for (invoice in invoiceService.fetchPendingInvoicesByCustomerId(customer.id)) {
+            try {
+                processInvoice(customer, invoice)
+            } catch (e: CurrencyMismatchException) {
+                notifyError(e, customer, invoice)
+                continue
+            } catch (e: CustomerNotFoundException) {
+                notifyError(e, customer, invoice)
+                break
+            }
+        }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -100,7 +117,7 @@ class BillingService(
     private suspend fun processInvoice(customer: Customer, invoice: Invoice) {
         if (processInvoiceWithRetry(invoice)) {
             notifyEvent(EventStatus.INVOICE_CHARGED, customer, invoice)
-            updateInvoice(customer, invoice)
+            updateInvoiceStatus(customer, invoice)
         } else {
             notifyEvent(EventStatus.INSUFFICIENT_FUNDS, customer, invoice)
         }
@@ -114,12 +131,14 @@ class BillingService(
         return processed
     }
 
-    private fun updateInvoice(customer: Customer, invoice: Invoice) {
-        try {
+    private fun updateInvoiceStatus(customer: Customer, invoice: Invoice): Boolean {
+        return try {
             invoiceService.updateInvoiceStatus(invoice, InvoiceStatus.PAID)
-            notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, customer, invoice)
+            notifyEvent(EventStatus.INVOICE_UPDATED, customer, invoice)
+            true
         } catch (e: InvoiceNotUpdatedException) {
             notifyError(e, customer, invoice)
+            false
         }
     }
 
@@ -136,6 +155,10 @@ class BillingService(
             EventStatus.INSUFFICIENT_FUNDS -> {
                 notificationService.notifyEvent(EventStatus.INSUFFICIENT_FUNDS, customer, invoice)
                 logger.debug { "Insufficient funds for customer ${customer.id} and invoice ${invoice.id}" }
+            }
+            EventStatus.MANUAL_INVOICE_UPDATE -> {
+                notificationService.notifyEvent(EventStatus.MANUAL_INVOICE_UPDATE, customer, invoice)
+                logger.debug { "The invoice with id ${invoice.id} is going to be updated manually" }
             }
             else -> {}
         }
