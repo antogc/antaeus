@@ -50,10 +50,7 @@ class BillingService(
         checkProcessIsNotRunning()
         notifyEvent(EventStatus.MANUAL_INVOICE_UPDATE, customer, invoice)
         return if (paymentProvider.charge(invoice)) {
-            notifyEvent(EventStatus.INVOICE_CHARGED, customer, invoice)
-            invoiceService.updateInvoiceStatus(invoice, InvoiceStatus.PAID)
-            notifyEvent(EventStatus.INVOICE_UPDATED, customer, invoice)
-            true
+            updateInvoiceStatus(customer, invoice)
         } else {
             notifyEvent(EventStatus.INSUFFICIENT_FUNDS, customer, invoice)
             false
@@ -90,6 +87,17 @@ class BillingService(
         notificationService.notifyEvent(EventStatus.BILLING_PROCESS_FINISHED)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun CoroutineScope.createCustomersChannel(): ReceiveChannel<Customer> = produce(capacity = CUSTOMERS_CHANNEL_MAX_LIMIT) {
+        val pageFetcher = customerService.getPageFetcher()
+        while (pageFetcher.hasNext()) {
+            val customers = pageFetcher.nextPage()
+            customers.forEach {
+                send(it)
+            }
+        }
+    }
+
     private suspend fun processCustomerInvoices(customer: Customer){
         for (invoice in invoiceService.fetchPendingInvoicesByCustomerId(customer.id)) {
             try {
@@ -104,20 +112,8 @@ class BillingService(
         }
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private fun CoroutineScope.createCustomersChannel(): ReceiveChannel<Customer> = produce(capacity = CUSTOMERS_CHANNEL_MAX_LIMIT) {
-        val pageFetcher = customerService.getPageFetcher()
-        while (pageFetcher.hasNext()) {
-            val customers = pageFetcher.nextPage()
-            customers.forEach {
-                send(it)
-            }
-        }
-    }
-
     private suspend fun processInvoice(customer: Customer, invoice: Invoice) {
         if (processInvoiceWithRetry(invoice)) {
-            notifyEvent(EventStatus.INVOICE_CHARGED, customer, invoice)
             updateInvoiceStatus(customer, invoice)
         } else {
             notifyEvent(EventStatus.INSUFFICIENT_FUNDS, customer, invoice)
@@ -135,7 +131,7 @@ class BillingService(
     private fun updateInvoiceStatus(customer: Customer, invoice: Invoice): Boolean {
         return try {
             invoiceService.updateInvoiceStatus(invoice, InvoiceStatus.PAID)
-            notifyEvent(EventStatus.INVOICE_UPDATED, customer, invoice)
+            notifyEvent(EventStatus.INVOICE_PROCESSED, customer, invoice)
             true
         } catch (e: InvoiceNotUpdatedException) {
             notifyError(e, customer, invoice)
@@ -145,13 +141,9 @@ class BillingService(
 
     private fun notifyEvent(status: EventStatus, customer: Customer, invoice: Invoice) {
         when (status) {
-            EventStatus.INVOICE_CHARGED -> {
-                notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, customer, invoice)
-                logger.debug { "Invoice charged for customer ${customer.id} and id ${invoice.id}" }
-            }
-            EventStatus.INVOICE_UPDATED -> {
-                notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, customer, invoice)
-                logger.debug { "Invoice updated customer ${customer.id} and id ${invoice.id} " }
+            EventStatus.INVOICE_PROCESSED -> {
+                notificationService.notifyEvent(EventStatus.INVOICE_PROCESSED, customer, invoice)
+                logger.debug { "Invoice processed for customer ${customer.id} and id ${invoice.id}" }
             }
             EventStatus.INSUFFICIENT_FUNDS -> {
                 notificationService.notifyEvent(EventStatus.INSUFFICIENT_FUNDS, customer, invoice)

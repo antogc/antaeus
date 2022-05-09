@@ -46,7 +46,7 @@ internal class BillingServiceTest {
         val expectedHashNextCalls = 3 //fetcher needs an extra call to verify no more pages
         val expectedNextPageCalls = 2 //first one with a page, second one empty
         val expectedFetchInvoiceByCustomerCalls = 2 //2 customers
-        val expectedInvoiceCharged = 4 //each customer with 2 invoices
+        val expectedProcessedInvoices = 4 //each customer with 2 invoices
 
         billingService.initBillingProcess()
 
@@ -54,10 +54,9 @@ internal class BillingServiceTest {
         verify(exactly = expectedHashNextCalls) { customerPageFetcher.hasNext() }
         verify(exactly = expectedNextPageCalls) { customerPageFetcher.nextPage() }
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
-        verify(exactly = expectedInvoiceCharged) { paymentProvider.charge(any()) }
-        verify(exactly = expectedInvoiceCharged) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
-        verify(exactly = expectedInvoiceCharged) { notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, any(), any()) }
-        verify(exactly = expectedInvoiceCharged) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
+        verify(exactly = expectedProcessedInvoices) { paymentProvider.charge(any()) }
+        verify(exactly = expectedProcessedInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
+        verify(exactly = expectedProcessedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_PROCESSED, any(), any()) }
         confirmVerified(customerService, invoiceService, customerService, customerPageFetcher)
     }
 
@@ -71,7 +70,7 @@ internal class BillingServiceTest {
         val expectedHashNextCalls = 4 //fetcher needs an extra call to verify no more pages
         val expectedNextPageCalls = 3 //2 pages with customers and one empty page
         val expectedFetchInvoiceByCustomerCalls = 4 //4 customers
-        val expectedInvoiceProcessed = 8 //each customer with 2 invoices
+        val expectedProcessedInvoices = 8 //each customer with 2 invoices
 
         billingService.initBillingProcess()
 
@@ -79,8 +78,8 @@ internal class BillingServiceTest {
         verify(exactly = expectedHashNextCalls) { customerPageFetcher.hasNext() }
         verify(exactly = expectedNextPageCalls) { customerPageFetcher.nextPage() }
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
-        verify(exactly = expectedInvoiceProcessed) { paymentProvider.charge(any()) }
-        verify(exactly = expectedInvoiceProcessed) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
+        verify(exactly = expectedProcessedInvoices) { paymentProvider.charge(any()) }
+        verify(exactly = expectedProcessedInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
         confirmVerified(customerService, invoiceService, customerService, customerPageFetcher)
     }
 
@@ -91,14 +90,14 @@ internal class BillingServiceTest {
         expectPaymentProviderThrowsExceptionTemporally()
         val expectedFetchInvoiceByCustomerCalls = 2 //2 customers
         val expectedInvoiceChargedCalls = 5 //2 customer with 2 invoices + 1 retry
-        val expectedUpdateInvoices = 4 //2 customer with 2 invoices
+        val expectedProcessedInvoices = 4 //2 customer with 2 invoices
 
         billingService.initBillingProcess()
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) } //4 + 1 retry
-        verify(exactly = expectedUpdateInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
-        verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
+        verify(exactly = expectedProcessedInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
+        verify(exactly = expectedProcessedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_PROCESSED, any(), any()) }
         confirmVerified(invoiceService, paymentProvider)
     }
 
@@ -109,15 +108,14 @@ internal class BillingServiceTest {
         expectPaymentProviderThrowsCustomerNotFoundException()
         val expectedFetchInvoiceByCustomerCalls = 2 //2 customers
         val expectedInvoiceChargedCalls = 3 //2 customer but first one not found: 1 failed call for the first + 2 correct for the second
-        val expectedUpdateInvoices = 2 //2 customer with 2 invoices, but first customer not found
+        val expectedProcessedInvoices = 2 //2 customer with 2 invoices, but first customer not found
 
         billingService.initBillingProcess()
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
-        verify(exactly = expectedUpdateInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
-        verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
-        verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, any(), any()) }
+        verify(exactly = expectedProcessedInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
+        verify(exactly = expectedProcessedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_PROCESSED, any(), any()) }
         verify(exactly = 1) { notificationService.notifyEvent(EventStatus.CUSTOMER_NOT_FOUND, any(), any()) }
         confirmVerified(invoiceService, paymentProvider)
     }
@@ -129,15 +127,14 @@ internal class BillingServiceTest {
         expectPaymentProviderThrowsCurrencyMismatchException()
         val expectedFetchInvoiceByCustomerCalls = 2 //2 customers
         val expectedInvoiceChargedCalls = 4 //2 customer 2 invoices each one
-        val expectedUpdateInvoices = 3 //2 customer with 2 invoices, but first invoice was not updated
+        val expectedProcessedInvoices = 3 //2 customer with 2 invoices, but first invoice was not updated
 
         billingService.initBillingProcess()
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
-        verify(exactly = expectedUpdateInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
-        verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, any(), any()) }
-        verify(exactly = expectedUpdateInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
+        verify(exactly = expectedProcessedInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
+        verify(exactly = expectedProcessedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_PROCESSED, any(), any()) }
         verify(exactly = 1) { notificationService.notifyEvent(EventStatus.CURRENCY_MISMATCH, any(), any()) }
         confirmVerified(invoiceService, paymentProvider)
     }
@@ -151,16 +148,14 @@ internal class BillingServiceTest {
         val expectedFetchInvoiceByCustomerCalls = 2 //2 customers
         val expectedInvoiceChargedCalls = 4 //2 customer 2 invoices each one
         val expectedInvoiceUpdateCalls = 4 //2 customer 2 invoices each one
-        val expectedChargedInvoices = 4 //2 customer with 2 invoices
-        val expectedUpdatedInvoices = 3 //2 customer with 2 invoices, but first invoice was not updated
+        val expectedProcessedInvoices = 3 //2 customer with 2 invoices
 
         billingService.initBillingProcess()
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
         verify(exactly = expectedInvoiceUpdateCalls) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
-        verify(exactly = expectedChargedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_CHARGED, any(), any()) }
-        verify(exactly = expectedUpdatedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_UPDATED, any(), any()) }
+        verify(exactly = expectedProcessedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_PROCESSED, any(), any()) }
         verify(exactly = 1) { notificationService.notifyEvent(EventStatus.INVOICE_NOT_UPDATED, any(), any()) }
         confirmVerified(invoiceService, paymentProvider)
     }

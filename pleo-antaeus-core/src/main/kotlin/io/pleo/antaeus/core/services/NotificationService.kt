@@ -20,10 +20,9 @@ enum class EventStatus {
     MANUAL_INVOICE_UPDATE,
     CURRENCY_MISMATCH,
     CUSTOMER_NOT_FOUND,
-    INVOICE_CHARGED,
+    INVOICE_PROCESSED,
     INSUFFICIENT_FUNDS,
-    INVOICE_NOT_UPDATED,
-    INVOICE_UPDATED
+    INVOICE_NOT_UPDATED
 }
 
 class NotificationService {
@@ -43,8 +42,8 @@ class NotificationService {
                 sendAlert(EventStatus.CUSTOMER_NOT_FOUND, customer, invoice)
                 //update metrics
             }
-            EventStatus.INVOICE_CHARGED -> {
-                sendNotificationToCustomer(EventStatus.INVOICE_CHARGED, customer, invoice)
+            EventStatus.INVOICE_PROCESSED -> {
+                sendNotificationToCustomer(EventStatus.INVOICE_PROCESSED, customer, invoice)
                 //update metrics
             }
             EventStatus.INSUFFICIENT_FUNDS -> {
@@ -52,7 +51,9 @@ class NotificationService {
                 //update metrics
             }
             EventStatus.INVOICE_NOT_UPDATED -> {
-                sendAlert(EventStatus.INVOICE_UPDATED, customer, invoice)
+                //the invoice was charged but not updated: send email to customer to confirm the payment and alert to system admins
+                sendNotificationToCustomer(EventStatus.INVOICE_PROCESSED, customer, invoice)
+                sendAlert(EventStatus.INVOICE_NOT_UPDATED, customer, invoice)
                 //update metrics
             }
             else -> {}
