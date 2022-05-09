@@ -222,13 +222,13 @@ Due to time limitations I have not implemented a specific component, I  simply p
 I have added some extra endpoints to the api-rest component. The idea is to provide the user more functional ways to manage with the system.
 For a real production-ready system, we should provide some auth mechanism to prevent undesired users to use it.
 
-* /rest/v1/invoices: get all invoices
-* /rest/v1/invoices/{:id}: get an specific invoice
-* /rest/v1/invoices/{:status}: get all invoices of a specific status
-* /rest/v1/customers: fetch all customers
-* /rest/v1/customers/{:id}: get a specific customer
-* /rest/v1/payments/executeBillingProcess: launch the billing process. It will do nothing if the process is already running.
-* /rest/v1/payments/invoices/{:id}: process an specific invoice
+* GET /rest/v1/invoices: get all invoices
+* GET /rest/v1/invoices/{:id}: get an specific invoice
+* GET /rest/v1/invoices/{:status}: get all invoices of a specific status
+* GET /rest/v1/customers: fetch all customers
+* GET /rest/v1/customers/{:id}: get a specific customer
+* POST /rest/v1/payments/executeBillingProcess: launch the billing process. It will do nothing if the process is already running.
+* POST /rest/v1/payments/invoices/{:id}: process an specific invoice
 
 In order to prevent the billing process to be executed twice, I have added a lock that avoids executing the process if it is already running.
 
@@ -262,8 +262,28 @@ To protect it, we could add a circuit breaker.
 Keeping the code quality is capital for whatever development process. 
 I would suggest using tools to check the code quality, like a linter for local development and sonar for full analyses.
 
+Time spent: 6 hours
+
 ### Conclusions
 
+I have to recognize that I have enjoyed it a lot, but it's been challenging. 
+
+On one side, programming with Kotlin, such a really great language! Initially I barely knew some basic concepts, 
+but now I strongly want to continue the travel of becoming an expert in kotlin!. 
+
+On the other side, the business context, I have never worked before with processes related with payments, 
+it is not easy providing a secure context for that kind of processes. For the challenge I have tried to provide a 
+close-to-real solution but inside the context of a challenge. I have relied on my experience to provide an effective solution. I hope I got it.
+
+Regarding the readme, just to mention that I have tried to translate the whole process since I started with the Kotlin documentation 
+until the final phase. I hope it is not too heavy for the reader.
+
+Finally, a summary of the time spent for the challenge:
+* Learning Kotlin: 6-8 hours
+* Analysis and design: 2 hours
+* Initial prototype: 6 hours
+* Second evolution: asynchronous and pagination: 6 hours
+* Final improvements: 4 hours. 
 
 
 
