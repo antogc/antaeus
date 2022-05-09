@@ -7,8 +7,8 @@ import com.github.michaelbull.retry.policy.binaryExponentialBackoff
 import com.github.michaelbull.retry.policy.plus
 import com.github.michaelbull.retry.retry
 import io.pleo.antaeus.core.config.CUSTOMERS_CHANNEL_MAX_LIMIT
-import io.pleo.antaeus.core.config.NETWORK_RETRY_BASE
-import io.pleo.antaeus.core.config.NETWORK_RETRY_MAX
+import io.pleo.antaeus.core.config.NETWORK_RETRY_BACKOFF_BASE
+import io.pleo.antaeus.core.config.NETWORK_RETRY_BACKOFF_MAX
 import io.pleo.antaeus.core.exceptions.*
 import io.pleo.antaeus.core.external.PaymentProvider
 import io.pleo.antaeus.models.Customer
@@ -122,7 +122,7 @@ class BillingService(
 
     private suspend fun processInvoiceWithRetry(invoice: Invoice): Boolean {
         var processed: Boolean
-        retry(retryPolicy  + binaryExponentialBackoff(base = NETWORK_RETRY_BASE, max = NETWORK_RETRY_MAX)) {
+        retry(retryPolicy  + binaryExponentialBackoff(base = NETWORK_RETRY_BACKOFF_BASE, max = NETWORK_RETRY_BACKOFF_MAX)) {
             processed = paymentProvider.charge(invoice)
         }
         return processed
