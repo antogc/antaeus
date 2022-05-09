@@ -42,7 +42,7 @@ class CustomersPageFetcherTest {
 
     @Test
     fun `fetcher will return empty page`() {
-        every { dal.fetchCustomersPage(BASE_ID) } returns emptyList()
+        expectEmptyPage()
 
         val fetcher = CustomersPageFetcher(dal)
 
@@ -56,7 +56,7 @@ class CustomersPageFetcherTest {
 
     @Test
     fun `fetcher will return empty page and reset the marker`() {
-        every { dal.fetchCustomersPage(BASE_ID) } returns emptyList()
+        expectEmptyPage()
 
         val fetcher = CustomersPageFetcher(dal)
 
@@ -76,9 +76,7 @@ class CustomersPageFetcherTest {
 
     @Test
     fun `fetcher will return only one page`() {
-        val customersPage = listOf(Customer(CUSTOMER_ID_1, Currency.EUR), Customer(CUSTOMER_ID_2, Currency.EUR))
-        every { dal.fetchCustomersPage(BASE_ID) } returns customersPage
-        every { dal.fetchCustomersPage(CUSTOMER_ID_2) } returns  emptyList() //marker -> first page last Id = customer2
+        expectOnePage()
 
         val fetcher = CustomersPageFetcher(dal)
 
@@ -90,6 +88,16 @@ class CustomersPageFetcherTest {
 
         verify (exactly = 2) { dal.fetchCustomersPage(any()) }
         confirmVerified(dal)
+    }
+
+    private fun expectEmptyPage() {
+        every { dal.fetchCustomersPage(BASE_ID) } returns emptyList()
+    }
+
+    private fun expectOnePage() {
+        val customersPage = listOf(Customer(CUSTOMER_ID_1, Currency.EUR), Customer(CUSTOMER_ID_2, Currency.EUR))
+        every { dal.fetchCustomersPage(BASE_ID) } returns customersPage
+        every { dal.fetchCustomersPage(CUSTOMER_ID_2) } returns emptyList() //marker -> first page last Id = customer2
     }
 }
 
