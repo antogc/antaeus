@@ -85,7 +85,7 @@ The code given is structured as follows. Feel free however to modify the structu
 * [Mockk](https://mockk.io/) - Mocking library
 * [Sqlite3](https://sqlite.org/index.html) - Database storage engine
 
-Happy hacking 😁!
+Happy hacking 😁!"submit
 
 
 ## Work log
@@ -166,9 +166,9 @@ performance, and finally to improve the code quality.
 ### Initial prototype
 
 Having in mind the concerns above-mentioned, I made some decisions for the initial prototype:
-* Scheduled task. I had a look at a library called Krontab (https://insanusmokrassar.github.io/krontab/). It seemed easy to implement, but I decided to postpone its implementation to focus on the billing service logic.
+* Scheduled task. I had a look at a library called [Krontab](https://insanusmokrassar.github.io/krontab/). It seemed easy to implement, but I decided to postpone its implementation to focus on the billing service logic.
 * Billing service logic. Two nested loops, first iterating over customers and then over customer's pending invoices. No concurrency. No pagination.
-* Error handling with retry for NetworkExceptions. I will use the library kotlin-retry (https://github.com/michaelbull/kotlin-retry)
+* Error handling with retry for NetworkExceptions. I will use the library [kotlin-retry](https://github.com/michaelbull/kotlin-retry)
 * The invoice service will raise an Exception if the invoice update status operation fails. Errors will be handled by the billing service, so far they will be just logged.
 * Unit test using kotest-assertions-core assertions library.
 
