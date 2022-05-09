@@ -93,101 +93,178 @@ Happy hacking 😁!
 ### Initial steps
 
 Initially I just had some basic knowledge about Kotlin, so I decided to take advantage of the challenge to learn Kotlin in depth. 
-The first step, before facing the challenge itself, was indeed learning about Kotlin. I spent about 6-8 hours reading the official documentation, 
+The first step, before facing the challenge itself, was indeed learning about Kotlin by reading the official documentation and performing some hand-ons.
+I spent about 6-8 hours.
 
-Next step was reading and understanding the challenge purpose. Once that, I reviewed all the code structure and performed some executions to learn about different components and its interactions.
-Even I made a diagram to have a visual about the anteus structure. I spent like on hour on this.
+Next step was reading and understanding the challenge purpose. Once that, I reviewed all the code structure and performed some test executions 
+to learn about different components and its interactions. Even I made a diagram to have a visual about the anteus structure. It took me like on hour.
 
 ### Initial concerns
 
 During the analysis phase I have identified some key points to be aware of: 
-* Scheduled task. Should the application provide a mode to start the process immediately after boot?. In case of an unexpected error during the task execution, we will want to start the process again.
-* Billing service basic flow. Two possibilities
-  * Two nested loops, first to fetch customers, second to fetch pending invoices by customer. 
-  * One loop over all pending invoices (sorted by customerId).
-  * I prefer the first one, processing customers in order. This way we will process all the customers pending invoices at the same moment. In case of issues, it will be easier to monitor. Furthermore, we will take advantage of the CustomerNotFoundException skipping remaining invoices.
-* Each customer invoice is processed individually. That is, the invoice is charged and then updated in the db (status PAID).
-  * What if the updating invoice status process fails? The invoice is already processed but the BD does not reflect the status. An initial idea could be implementing a new service that stores those failures to be re-processed again in some moment (like a `dead letter queue`)
-* Assuming a huge amount of Customers, a `pagination` mechanism to get customers would be great.
-* Asynchronous implementation. Different customers could be processed in an Asynchronous way.
-* Error handling. 
-  * NetworkException: retry indefinitely
-  * Customer not found exception: log and pass the next customer
-  * CurrencyMismatchException: log and pass the next invoice 
+
+#### Scheduled task 
+Should the application provide a mode to start the process immediately after boot?. 
+In case of an unexpected error during the task execution, we could want to execute again the process.
+
+#### Billing service basic flow
+Initially, I see to possibilities: 
+* Two nested loops; first one to fetch customers, and the second one to fetch pending invoices by customer.
+* One loop over all pending invoices.
+
+I have decided implementing the first option. Apparently only one invoice should be pending to be charged per customer, but
+it is not said that a customer could have more than one. Furthermore, we have to be aware the number of customers can grow up in a huge magnitude.
+Iterating first by customers and then by invoices, allows the process
+to be tidier. In case of issues, it will be easier to monitor. Furthermore, we will take advantage of the CustomerNotFoundException skipping remaining customer's invoices.  
+
+#### Invoice processing: charge and update
+Once an invoice has been charged, we have to update it status in the database. It is a critical moment on the flow, and 
+I have decided to implement it in an atomic way, that is, once the invoice is charged, it will be updated in the database.
+We could think in more efficient way by using batches to update the status, but in case of errors it will be harder to deal with. 
+
+In case of error on the updating, the system should raise an alert. Then, the issue could be fixed manually or event automatically by using 
+a mechanism to re-process failures (like a `dead letter queue`). Anyway, whatever the mechanism, ensuring that a payment is not going to be charge twice is complex, 
+manual processes are error-prone, and with an automatic process we would need a high level of sync. 
+One way to reduce the risk would be by ensuring that the PaymentProvider can not charge twice the same invoice.
+
+#### Error handling
+The Payment provider can raise several exceptions, the billing service will proceed in a different way depends on it:
+* NetworkException: I consider that exception like a Recoverable issue, at some moment the connection has to be fixed and the system can continue with the process. I will implement a retry mechanism, based on a backoff algorithm that will re-attempt indefinitely.
+* CustomerNotFoundException: in that case the service will log the error and pass the next customer.
+* CurrencyMismatchException: I assume that case is because of an error on data,that should be fixed manually. The service will log the issue and passing to the next invoice.
+
+#### Efficiency and performance
+Initially I have detected two main aspects to improve the service performance.
+
+<ins>Asynchronous processing</ins>
+
+The service will use a third-party component (Payment provider), and that call could some take time. Using an asynchronous 
+implementation we will take advantage on that idle time by performing new calls (or whatever action).  
+
+<ins>Keyset pagination</ins>
+
+We have to assume the number of customers can grow up on a huge magnitude. The service will iterate first over all the customers
+and then over its pending invoices. Using a pagination mechanism to fetch customers will avoid the communication or the database to be overloaded. 
+
+Keyset pagination offers better performance than regular offset pagination, specially on large datasets. It is designed to
+iterate a whole table, but it can not get specific pages.
+
+### A bit about my coding style
+
+I like to code thinking on several clean-codes principles like SOLID, TDD, KISS. Aside of the solution efficiency and performance, 
+the code should serve as a documentation.
+
+I usually start with some basic tests, covering the main acceptance criteria, then I like to implement a basic solution to cover 
+the tests. Once we have the security that tests provide I start by applying refactors on the solution, initially to provide 
+performance, and finally to improve the code quality. 
 
 ### Initial prototype
 
 Having in mind the concerns above-mentioned, I made some decisions for the initial prototype:
-* Scheduled task. I had a look at Krontab, and it seemed easy to implement, but I decided to postpone its implementation to focus on the billing service logic.
-* Billing service initial implementation. 
-  * Two nested loops over customer and customer-invoices.
-  * Each invoice is processed and updated in the DB atomically.
-  * Error handling with retry for NetworkExceptions
-  * No pagination mechanism.
-  * No concurrency.
-  * Errors on update invoice operation are just logged.
+* Scheduled task. I had a look at Crontab, and it seemed easy to implement, but I decided to postpone its implementation to focus on the billing service logic.
+* Billing service logic. Two nested loops, first iterating over customers and then over customer's pending invoices. No concurrency. No pagination.
+* Error handling with retry for NetworkExceptions
+* Errors on database updates (from PENDING TO PAID) are just logged.
+* Unit test using kotest-assertions-core library.
 
 Time spent initial prototype, analysis, design, implementation and tests: 6 hours
 
 ### Second evolution
 
-The main idea for the next evolution is to implement the billing process in a concurrent way. The idea is to 
+The main point for the next evolution is to implement the billing process in a concurrent way. The idea is to 
 have two different process running at the same time: 
-* A process fetching customers from the db.
+* A process fetching customers from the db (using keyset pagination).
 * Another process in charge of processing customer's invoices.
 
 For that purpose, I will implement a `producer-consumer` pattern using a `Channel producer`. 
 
-The first component will be the `Channel Producer`, that is going to provide a channel serving customers. 
-The producer will use a new component provided by the customer service, a `customerPageFetcher`, that component is able to 
-get customers pages by page, using `keyset pagination`,  and then the producer will serve customers one by one.
+The first component will be the Channel Producer, that is going to provide a channel serving customers. 
+The producer will use a new component provided by the customer service, a `CustomerPageFetcher`, that component is able to 
+get customers page by page, using keyset pagination. The producer will send customers one by one.
 
-The second component, the `Consumer`, will be in charge of processing invoices for a specific customer, and it's going to use a coroutine for each user.  
+On the other side, the consumer, I will implement a coroutine that will be in charge of processing customer's pending invoices.   
 
-Two important questions:
-* Why Keyset pagination? Because it provides better performance than regular offset pagination.
-* Why pagination for customers and no for invoices?. Looking at the initial data it seems to me that 
-the number of customers could be large enough to require a pagination mechanism, I'm not sure the same can happen for invoices.
-Assuming a regular behaviour where invoices are processed periodically, I would not expect too much growth.
+That mechanism allows decoupling both processes fetching customer from the database and the process of the invoices.
+Since the producer will be faster than the consumer, I have introduced a limit on the Channel size to prevent the producer from overloading it. 
 
 Time spent: 6 hours
 
-### Improvements
+### Final version
+
+#### Scheduled task
+I have implemented a new component that will be in charge of the scheduling of the process. 
+
+The component accepts some configurations: 
+* Schedule expression: the task will be launched on a monthly basis, at first day on every month. 
+* Execute on boot: it allows to execute the billing process once the app boots. 
+* Initial execution delay: in case of execution on boot, the delay in seconds to start after the app is booted. 
 
 #### Notification service
 
-In systems like Anteus, where transactions (payments in that case) are capital, is always a good idea to keep an event log, 
-where all events in the systems are registered. Furthermore, the system should be able to proceed depending on the kind of event, 
-for instance:
+In systems like Anteus, where transactions (payments in that case) are critical, it is always a good idea to keep an event log,
+where all events in the systems are registered, those events could be re-processed to fix possible issues. 
+Furthermore, the notification service will proceed depending on the kind of event, for instance:
 * by sending an email to customer when an invoice has been charged
-* by raising an alert in case of error. 
+* by raising an alert in case of error.
 
-Think of the case where an Invoice is charged but due to an error in the db the status is not updated. In that case, the notification 
-service should alert system administrators, who should fix the issue, in that case, by updating manually the invoice.
-Given that the process is going to be executed once per month, it should be enough time to fix all the issues. Anyway, we have 
-to be aware that we speak about a manual process, and hence, error prone. If the payment provider can not ensure that the
-same invoice can not be charged twice, new countermeasures we be implemented.  
+Given that all the events are processed for the notification service is good point to generate system metrics.
 
-I have provided just a dummy implementation for the notification service, as I consider is out of the challenge purpose. 
-Regarding its real design, a few ideas: 
-* I would consider using a NO SQL db to store events logs. 
-* Furthermore, we could take advantage of the service to generate metrics about the system. Those metrics could be gathered by a monitoring system, for instance Prometheus + Grafana
+Due to time limitations I have simply implemented a basic solution, to provide an idea about it.
 
-Time spent: 2 hours
+#### ConfigProvider
+
+Ideally, system configs should be provided by a central component, something similar to what Spring Cloud Config provides. 
+
+Due to time limitations I have not implemented a specific component, I  simply put some constants on a ConfigProvider to serve as a central for configurations.
+
+#### Extra endpoints
+
+I have added some extra endpoints to the api-rest component. The idea is to provide the user more functional ways to manage with the system.
+For a real production-ready system, we should provide some auth mechanism to prevent undesired users to use it.
+
+* /rest/v1/invoices: get all invoices
+* /rest/v1/invoices/{:id}: get an specific invoice
+* /rest/v1/invoices/{:status}: get all invoices of a specific status
+* /rest/v1/customers: fetch all customers
+* /rest/v1/customers/{:id}: get a specific customer
+* /rest/v1/payments/executeBillingProcess: launch the billing process. It will do nothing if the process is already running.
+* /rest/v1/payments/invoices/{:id}: process an specific invoice
+
+In order to prevent the billing process to be executed twice, I have added a lock that avoids executing the process if it is already running.
+
+### Future improvements
+
+Finally, simply comment some improvements for the future:
+
+<ins> Monitoring & Metrics </ins>
+
+In systems like Anteus is capital to be able to monitor what is happening. Improving the observability helps the system administrator to anticipate future issues.
+
+For that purpose is crucial providing good logging to understand service behaviour. We could also add a mechanism to trace request to the payment provider, 
+this way we could match issues on both components.
+
+As above-mentioned, the notification services could be improved to generate system metrics, like: 
+* number of invoices processed
+* Payment provider call execution time
+* Number of errors.
+
+Logs could be processed by a stack like ELK (ElasticSearch, Logstash and Kibana).
+
+For metrics, a system based on Prometheus and Grafana.
+
+<ins> Circuit breaker </ins>
+
+The Payment provider is an external service that could be overloaded by our system. 
+To protect it, we could add a circuit breaker.
+
+<ins> Code quality </ins>
+
+Keeping the code quality is capital for whatever development process. 
+I would suggest using tools to check the code quality, like a linter for local development and sonar for full analyses.
+
+### Conclusions
 
 
-
-Implement scheduled task. Idea 2 tipos:
-* scheduled
-  - just once
-
-*Provide extra endpoints
-  - update invoice
-  - update customer
-  - pay invoice
-  - list customer pendings
-
-* Provide configuration file, configurationService  as a file of constants.
 
 
 
