@@ -10,6 +10,7 @@ import io.pleo.antaeus.core.exceptions.*
 import io.pleo.antaeus.core.services.BillingService
 import io.pleo.antaeus.core.services.CustomerService
 import io.pleo.antaeus.core.services.InvoiceService
+import io.pleo.antaeus.models.InvoiceStatus
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -26,6 +27,14 @@ class AntaeusRest(
 
     override fun run() {
         app.start(7000)
+    }
+
+    private fun getStatus(status: String): InvoiceStatus? {
+        return try {
+            InvoiceStatus.valueOf(status)
+        } catch (e: Exception) {
+            null
+        }
     }
 
     // Set up Javalin rest app
@@ -63,11 +72,57 @@ class AntaeusRest(
                         // URL: /rest/v1/invoices
                         get {
                             it.json(invoiceService.fetchAll())
+                            it.status(200)
                         }
 
                         // URL: /rest/v1/invoices/{:id}
                         get(":id") {
                             it.json(invoiceService.fetch(it.pathParam("id").toInt()))
+                            it.status(200)
+                        }
+
+                        // URL: /rest/v1/invoices/status/:status}
+                        get("/status/:status") {
+                            val status = getStatus(it.pathParam("status").uppercase())
+                            if (status != null) {
+                                it.json(invoiceService.fetchByStatus(status))
+                                it.status(200)
+                            } else {
+                                it.json("Wrong status")
+                                it.status(400)
+                            }
+                        }
+
+                        // URL: /rest/v1/invoices/status/:status}
+                        get("/customer/:id") {
+                            try {
+                                val customer = customerService.fetch(it.pathParam("id").toInt())
+                                it.json(invoiceService.fetchByCustomerId(customer.id))
+                                it.status(200)
+                            } catch (e: CustomerNotFoundException) {
+                                it.json("Customer not found")
+                                it.status(404)
+                            }
+                        }
+                    }
+
+                    path("customers") {
+                        // URL: /rest/v1/customers
+                        get {
+                            it.json(customerService.fetchAll())
+                            it.status(200)
+                        }
+
+                        // URL: /rest/v1/customers/{:id}
+                        get(":id") {
+                            try {
+                                val customer = customerService.fetch(it.pathParam("id").toInt())
+                                it.json(customer)
+                                it.status(200)
+                            } catch (e: CustomerNotFoundException) {
+                                it.json("Customer not found")
+                                it.status(404)
+                            }
                         }
                     }
 
@@ -114,18 +169,6 @@ class AntaeusRest(
                                     it.json("There was an error updating the invoice. The payment was processed, but the invoice could not be updated in the db. PLease contact administrators.")
                                 }
                             }
-                        }
-                    }
-
-                    path("customers") {
-                        // URL: /rest/v1/customers
-                        get {
-                            it.json(customerService.fetchAll())
-                        }
-
-                        // URL: /rest/v1/customers/{:id}
-                        get(":id") {
-                            it.json(customerService.fetch(it.pathParam("id").toInt()))
                         }
                     }
                 }

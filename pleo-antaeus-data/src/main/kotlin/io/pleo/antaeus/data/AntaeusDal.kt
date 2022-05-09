@@ -81,10 +81,28 @@ class AntaeusDal(private val db: Database) {
         return fetchCustomer(id)
     }
 
-    fun fetchPendingInvoicesByCustomerId(id: Int): List<Invoice> {
+    fun fetchInvoicesByCustomerId(id: Int): List<Invoice> {
         return transaction(db) {
             InvoiceTable
-                .select { (InvoiceTable.customerId eq id) and (InvoiceTable.status eq InvoiceStatus.PENDING.toString()) }
+                .select { InvoiceTable.customerId eq id }
+                .orderBy(InvoiceTable.id to SortOrder.ASC)
+                .map { it.toInvoice() }
+        }
+    }
+
+    fun fetchInvoicesByCustomerIdAndStatus(id: Int, status: InvoiceStatus): List<Invoice> {
+        return transaction(db) {
+            InvoiceTable
+                .select { (InvoiceTable.customerId eq id) and (InvoiceTable.status eq status.toString()) }
+                .orderBy(InvoiceTable.id to SortOrder.ASC)
+                .map { it.toInvoice() }
+        }
+    }
+
+    fun fetchInvoicesByStatus(status: String): List<Invoice> {
+        return transaction(db) {
+            InvoiceTable
+                .select { (InvoiceTable.status eq status) }
                 .orderBy(InvoiceTable.id to SortOrder.ASC)
                 .map { it.toInvoice() }
         }
@@ -100,7 +118,7 @@ class AntaeusDal(private val db: Database) {
     fun fetchCustomersPage(idMarker: Int): List<Customer> {
         return transaction(db) {
             CustomerTable
-                .select { CustomerTable.id greater idMarker}
+                .select { CustomerTable.id greater idMarker }
                 .orderBy(CustomerTable.id to SortOrder.ASC)
                 .limit(DB_PAGE_LIMIT)
                 .map { it.toCustomer() }

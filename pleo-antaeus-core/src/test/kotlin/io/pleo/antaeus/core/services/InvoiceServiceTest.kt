@@ -1,5 +1,7 @@
 package io.pleo.antaeus.core.services
 
+import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.shouldBe
 import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.mockk
@@ -7,10 +9,16 @@ import io.mockk.verify
 import io.pleo.antaeus.core.exceptions.InvoiceNotFoundException
 import io.pleo.antaeus.core.exceptions.InvoiceNotUpdatedException
 import io.pleo.antaeus.data.AntaeusDal
+import io.pleo.antaeus.models.Currency
 import io.pleo.antaeus.models.Invoice
 import io.pleo.antaeus.models.InvoiceStatus
+import io.pleo.antaeus.models.Money
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import java.math.BigDecimal
+
+private const val CUSTOMER_ID = 1
+private const val CUSTOMER_404 = 404
 
 class InvoiceServiceTest {
 
@@ -26,8 +34,20 @@ class InvoiceServiceTest {
         expectFetchInvoice404()
 
         assertThrows<InvoiceNotFoundException> {
-            invoiceService.fetch(404)
+            invoiceService.fetch(CUSTOMER_404)
         }
+    }
+
+    @Test
+    fun `will fetch invoices by customer id and status pending`() {
+        expectInvoicesByCustomerIdAndPendingStatus()
+
+        val invoices = invoiceService.fetchPendingInvoicesByCustomerId(CUSTOMER_ID)
+
+        invoices shouldHaveSize 1
+        invoices[0].id shouldBe CUSTOMER_ID
+        verify { dal.fetchInvoicesByCustomerIdAndStatus(CUSTOMER_ID, InvoiceStatus.PENDING) }
+        confirmVerified(dal)
     }
 
     @Test
@@ -43,7 +63,13 @@ class InvoiceServiceTest {
     }
 
     private fun expectFetchInvoice404() {
-        every { dal.fetchInvoice(404) } returns null
+        every { dal.fetchInvoice(CUSTOMER_404) } returns null
+    }
+
+    private fun expectInvoicesByCustomerIdAndPendingStatus() {
+        every { dal.fetchInvoicesByCustomerIdAndStatus(CUSTOMER_ID, InvoiceStatus.PENDING) } returns listOf(
+            Invoice(1, CUSTOMER_ID, Money(BigDecimal.valueOf(1), Currency.EUR), InvoiceStatus.PENDING)
+        )
     }
 
     private fun expectInvoiceIsNotUpdated() {
