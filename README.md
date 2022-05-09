@@ -115,14 +115,15 @@ Initially, I see to possibilities:
 I have decided implementing the first option. Apparently only one invoice should be pending to be charged per customer, but
 it is not said that a customer could have more than one. Furthermore, we have to be aware the number of customers can grow up in a huge magnitude.
 Iterating first by customers and then by invoices, allows the process
-to be tidier. In case of issues, it will be easier to monitor. Furthermore, we will take advantage of the CustomerNotFoundException skipping remaining customer's invoices.  
+to be tidier. In case of issues, it will be easier to monitor. In addition, we will take advantage of the CustomerNotFoundException 
+to skip the customer's remaining invoices.  
 
 #### Invoice processing: charge and update
 Once an invoice has been charged, we have to update it status in the database. It is a critical moment on the flow, and 
-I have decided to implement it in an atomic way, that is, once the invoice is charged, it will be updated in the database.
+I have decided to implement it in an atomic way, that is, once the invoice is charged, it will be immediately updated in the database.
 We could think in more efficient way by using batches to update the status, but in case of errors it will be harder to deal with. 
 
-In case of error on the updating, the system should raise an alert. Then, the issue could be fixed manually or event automatically by using 
+In case of error on the updating, the system should raise an alert. Then, the issue could be fixed manually or even automatically by using 
 a mechanism to re-process failures (like a `dead letter queue`). Anyway, whatever the mechanism, ensuring that a payment is not going to be charge twice is complex, 
 manual processes are error-prone, and with an automatic process we would need a high level of sync. 
 One way to reduce the risk would be by ensuring that the PaymentProvider can not charge twice the same invoice.
@@ -161,11 +162,11 @@ performance, and finally to improve the code quality.
 ### Initial prototype
 
 Having in mind the concerns above-mentioned, I made some decisions for the initial prototype:
-* Scheduled task. I had a look at Crontab, and it seemed easy to implement, but I decided to postpone its implementation to focus on the billing service logic.
+* Scheduled task. I had a look at a library called Krontab (https://insanusmokrassar.github.io/krontab/). It seemed easy to implement, but I decided to postpone its implementation to focus on the billing service logic.
 * Billing service logic. Two nested loops, first iterating over customers and then over customer's pending invoices. No concurrency. No pagination.
-* Error handling with retry for NetworkExceptions
-* Errors on database updates (from PENDING TO PAID) are just logged.
-* Unit test using kotest-assertions-core library.
+* Error handling with retry for NetworkExceptions. I will use the library kotlin-retry (https://github.com/michaelbull/kotlin-retry)
+* The invoice service will raise an Exception if the invoice update status operation fails. Errors will be handled by the billing service, so far they will be just logged.
+* Unit test using kotest-assertions-core assertions library.
 
 Time spent initial prototype, analysis, design, implementation and tests: 6 hours
 
@@ -179,13 +180,13 @@ have two different process running at the same time:
 For that purpose, I will implement a `producer-consumer` pattern using a `Channel producer`. 
 
 The first component will be the Channel Producer, that is going to provide a channel serving customers. 
-The producer will use a new component provided by the customer service, a `CustomerPageFetcher`, that component is able to 
+The producer will use a new component provided by the customer service, a `CustomerPageFetcher`. That component is able to 
 get customers page by page, using keyset pagination. The producer will send customers one by one.
 
-On the other side, the consumer, I will implement a coroutine that will be in charge of processing customer's pending invoices.   
+On the other side, the consumer, receiving customers one by one, I will implement a coroutine that will be in charge of processing customer's pending invoices.   
 
-That mechanism allows decoupling both processes fetching customer from the database and the process of the invoices.
-Since the producer will be faster than the consumer, I have introduced a limit on the Channel size to prevent the producer from overloading it. 
+That mechanism allows decoupling both processes, fetching customer from the database and the processing of the invoices.
+Since the producer will be faster than the consumer, I have introduced a limit on the Channel size to prevent the producer overloading it. 
 
 Time spent: 6 hours
 
@@ -196,26 +197,27 @@ I have implemented a new component that will be in charge of the scheduling of t
 
 The component accepts some configurations: 
 * Schedule expression: the task will be launched on a monthly basis, at first day on every month. 
-* Execute on boot: it allows to execute the billing process once the app boots. 
-* Initial execution delay: in case of execution on boot, the delay in seconds to start after the app is booted. 
+* Execute on boot: it allows an initial execution of the billing process once the application boots. 
+* Initial execution delay: in case of execution on boot, the delay in seconds to start after the application is booted. 
 
 #### Notification service
 
 In systems like Anteus, where transactions (payments in that case) are critical, it is always a good idea to keep an event log,
-where all events in the systems are registered, those events could be re-processed to fix possible issues. 
+where all events in the system are registered, those events could be later re-processed to fix possible issues. 
 Furthermore, the notification service will proceed depending on the kind of event, for instance:
-* by sending an email to customer when an invoice has been charged
+* by sending an email to a customer when an invoice has been charged
 * by raising an alert in case of error.
-
-Given that all the events are processed for the notification service is good point to generate system metrics.
 
 Due to time limitations I have simply implemented a basic solution, to provide an idea about it.
 
+Given that all the events are processed by the notification service, it would be a good point to generate system metrics. 
+Metrics improves the system observability, allowing administrators to predict certain situations. 
+
 #### ConfigProvider
 
-Ideally, system configs should be provided by a central component, something similar to what Spring Cloud Config provides. 
+Ideally, system configurations should be provided by a central component, something similar to what Spring Cloud Config provides. 
 
-Due to time limitations I have not implemented a specific component, I  simply put some constants on a ConfigProvider to serve as a central for configurations.
+Due to time limitations I have not implemented a specific component, I simply put some constants on a ConfigProvider to serve as a central for the core services configurations.
 
 #### Extra endpoints
 
@@ -228,9 +230,11 @@ For a real production-ready system, we should provide some auth mechanism to pre
 * GET /rest/v1/customers: fetch all customers
 * GET /rest/v1/customers/{:id}: get a specific customer
 * POST /rest/v1/payments/executeBillingProcess: launch the billing process. It will do nothing if the process is already running.
-* POST /rest/v1/payments/invoices/{:id}: process an specific invoice
+* POST /rest/v1/payments/invoices/{:id}: process an specific invoice by its id.
 
-In order to prevent the billing process to be executed twice, I have added a lock that avoids executing the process if it is already running.
+In order to prevent the billing process to be executed twice at the same, I have added a lock that avoids executing the process if it is already running.
+
+Time spent on improvements: 4 hours
 
 ### Future improvements
 
@@ -240,8 +244,8 @@ Finally, simply comment some improvements for the future:
 
 In systems like Anteus is capital to be able to monitor what is happening. Improving the observability helps the system administrator to anticipate future issues.
 
-For that purpose is crucial providing good logging to understand service behaviour. We could also add a mechanism to trace request to the payment provider, 
-this way we could match issues on both components.
+For that purpose, is important to provide a good logging level, to understand service behaviour. 
+We could also add a mechanism to trace request to the payment provider, this way we could match issues on both components.
 
 As above-mentioned, the notification services could be improved to generate system metrics, like: 
 * number of invoices processed
@@ -250,37 +254,37 @@ As above-mentioned, the notification services could be improved to generate syst
 
 Logs could be processed by a stack like ELK (ElasticSearch, Logstash and Kibana).
 
-For metrics, a system based on Prometheus and Grafana.
+For metrics, a stack based on Prometheus and Grafana.
 
 <ins> Circuit breaker </ins>
 
 The Payment provider is an external service that could be overloaded by our system. 
-To protect it, we could add a circuit breaker.
+To protect it, we could add a circuit breaker. The circuit breaker will be activated when the provider starts failing, from that moment
+it will return a pre-configured response, at some time, it willa allow some new calls to the provider, if the response 
+is correct the circuit will be deactivated, allowing new requests to be performed. 
 
 <ins> Code quality </ins>
 
-Keeping the code quality is capital for whatever development process. 
-I would suggest using tools to check the code quality, like a linter for local development and sonar for full analyses.
-
-Time spent: 6 hours
+Keeping a high level of code quality is capital for whatever development process.  
+I would suggest using tools to check the code quality, like a linter for local development (klint) and a platform for full automated analyses (SonarQube).
 
 ### Conclusions
 
-I have to recognize that I have enjoyed it a lot, but it's been challenging. 
+I have to recognize that I have enjoyed that challenge a lot, but it was not as easy as I expected initially. 
 
 On one side, programming with Kotlin, such a really great language! Initially I barely knew some basic concepts, 
 but now I strongly want to continue the travel of becoming an expert in kotlin!. 
 
 On the other side, the business context, I have never worked before with processes related with payments, 
-it is not easy providing a secure context for that kind of processes. For the challenge I have tried to provide a 
+and it is not easy providing a secure context for that kind of processes. For the challenge I have tried to provide a 
 close-to-real solution but inside the context of a challenge. I have relied on my experience to provide an effective solution. I hope I got it.
 
-Regarding the readme, just to mention that I have tried to translate the whole process since I started with the Kotlin documentation 
+Regarding the readme, just to mention that I have tried to tell the whole process since I started with the Kotlin documentation 
 until the final phase. I hope it is not too heavy for the reader.
 
 Finally, a summary of the time spent for the challenge:
 * Learning Kotlin: 6-8 hours
-* Analysis and design: 2 hours
+* Analysis and design: 1-2 hours
 * Initial prototype: 6 hours
 * Second evolution: asynchronous and pagination: 6 hours
 * Final improvements: 4 hours. 
