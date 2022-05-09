@@ -118,6 +118,10 @@ Iterating first by customers and then by invoices, allows the process
 to be tidier. In case of issues, it will be easier to monitor. In addition, we will take advantage of the CustomerNotFoundException 
 to skip the customer's remaining invoices.  
 
+Be aware that logic can not be used in a system with several instances, we could not ensure the same invoice is processed twice. 
+For that purpose we would need a mechanism to split users among several instances. 
+For the challenge I will assume only one instance can be launched.  
+
 #### Invoice processing: charge and update
 Once an invoice has been charged, we have to update it status in the database. It is a critical moment on the flow, and 
 I have decided to implement it in an atomic way, that is, once the invoice is charged, it will be immediately updated in the database.
@@ -255,6 +259,11 @@ As above-mentioned, the notification services could be improved to generate syst
 Logs could be processed by a stack like ELK (ElasticSearch, Logstash and Kibana).
 
 For metrics, a stack based on Prometheus and Grafana.
+
+<ins> Database </ins>
+
+Another improvement would be moving from an in-memory database to a real relational one,
+I will say Postgres because it is the one I have the most experience with.
 
 <ins> Circuit breaker </ins>
 
