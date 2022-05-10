@@ -260,6 +260,12 @@ Logs could be processed by a stack like ELK (ElasticSearch, Logstash and Kibana)
 
 For metrics, a stack based on Prometheus and Grafana.
 
+<ins> Acceptance tests </ins>
+
+I would suggest implementing a suite of acceptance tests to cover the main acceptance criteria. The suite would be launched
+on each deployment to "dev" stage. This way, we not only verify that the basic behaviour is not broken, 
+but also the integration of different components in the development environment.  
+
 <ins> Database </ins>
 
 Another improvement would be moving from an in-memory database to a real relational one,
