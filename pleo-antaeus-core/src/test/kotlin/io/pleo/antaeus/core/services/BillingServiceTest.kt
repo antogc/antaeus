@@ -55,6 +55,7 @@ internal class BillingServiceTest {
         verify(exactly = expectedNextPageCalls) { customerPageFetcher.nextPage() }
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedProcessedInvoices) { paymentProvider.charge(any()) }
+        verify(exactly = expectedProcessedInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.IN_PROGRESS) }
         verify(exactly = expectedProcessedInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
         verify(exactly = expectedProcessedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_PROCESSED, any(), any()) }
         confirmVerified(customerService, invoiceService, customerService, customerPageFetcher)
@@ -79,6 +80,7 @@ internal class BillingServiceTest {
         verify(exactly = expectedNextPageCalls) { customerPageFetcher.nextPage() }
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedProcessedInvoices) { paymentProvider.charge(any()) }
+        verify(exactly = expectedProcessedInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.IN_PROGRESS) }
         verify(exactly = expectedProcessedInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
         confirmVerified(customerService, invoiceService, customerService, customerPageFetcher)
     }
@@ -96,6 +98,7 @@ internal class BillingServiceTest {
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) } //4 + 1 retry
+        verify(exactly = expectedProcessedInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.IN_PROGRESS) }
         verify(exactly = expectedProcessedInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
         verify(exactly = expectedProcessedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_PROCESSED, any(), any()) }
         confirmVerified(invoiceService, paymentProvider)
@@ -114,6 +117,7 @@ internal class BillingServiceTest {
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
+        verify(exactly = expectedProcessedInvoices + 1) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.IN_PROGRESS) }
         verify(exactly = expectedProcessedInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
         verify(exactly = expectedProcessedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_PROCESSED, any(), any()) }
         verify(exactly = 1) { notificationService.notifyEvent(EventStatus.CUSTOMER_NOT_FOUND, any(), any()) }
@@ -133,6 +137,7 @@ internal class BillingServiceTest {
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
+        verify(exactly = expectedProcessedInvoices + 1) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.IN_PROGRESS) }
         verify(exactly = expectedProcessedInvoices) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
         verify(exactly = expectedProcessedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_PROCESSED, any(), any()) }
         verify(exactly = 1) { notificationService.notifyEvent(EventStatus.CURRENCY_MISMATCH, any(), any()) }
@@ -141,7 +146,7 @@ internal class BillingServiceTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `will send a notification when invoice not update before charged`() = runTest {
+    fun `will send a notification when invoice not update before charged and leave invoice as in-progress`() = runTest {
         expectOnePageOfCustomersAndInvoicesScenario()
         expectPaymentProviderChargesInvoices()
         expectInvoiceStatusNotUpdated()
@@ -154,6 +159,7 @@ internal class BillingServiceTest {
 
         verify(exactly = expectedFetchInvoiceByCustomerCalls) { invoiceService.fetchPendingInvoicesByCustomerId(any()) }
         verify(exactly = expectedInvoiceChargedCalls) { paymentProvider.charge(any()) }
+        verify(exactly = expectedProcessedInvoices + 1) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.IN_PROGRESS) }
         verify(exactly = expectedInvoiceUpdateCalls) { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) }
         verify(exactly = expectedProcessedInvoices) { notificationService.notifyEvent(EventStatus.INVOICE_PROCESSED, any(), any()) }
         verify(exactly = 1) { notificationService.notifyEvent(EventStatus.INVOICE_NOT_UPDATED, any(), any()) }
@@ -174,10 +180,12 @@ internal class BillingServiceTest {
     fun `will process an invoice manually when customer has not funds then return false`()  {
         val customer = Customer(CUSTOMER_ID1, Currency.EUR)
         val invoice = Invoice(1, CUSTOMER_ID1, Money(BigDecimal.valueOf(AMOUNT), Currency.EUR), InvoiceStatus.PENDING)
+        every { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.IN_PROGRESS) } just Runs
         expectPaymentProviderReturnsNoFunds()
 
         billingService.processSingleInvoice(customer, invoice).shouldBeFalse()
 
+        verify { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.IN_PROGRESS) }
         confirmVerified(invoiceService)
     }
 
@@ -208,6 +216,7 @@ internal class BillingServiceTest {
     }
 
     private fun expectInvoiceStatusUpdated() {
+        every { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.IN_PROGRESS) } just Runs
         every { invoiceService.updateInvoiceStatus(any(), InvoiceStatus.PAID) } just Runs
     }
 

@@ -48,9 +48,11 @@ class BillingService(
      */
     fun processSingleInvoice(customer: Customer, invoice: Invoice): Boolean {
         checkProcessIsNotRunning()
+
+        updateInvoiceStatus(customer, invoice, InvoiceStatus.IN_PROGRESS)
         notifyEvent(EventStatus.MANUAL_INVOICE_UPDATE, customer, invoice)
         return if (paymentProvider.charge(invoice)) {
-            updateInvoiceStatus(customer, invoice)
+            updateInvoiceStatus(customer, invoice, InvoiceStatus.PAID)
         } else {
             notifyEvent(EventStatus.INSUFFICIENT_FUNDS, customer, invoice)
             false
@@ -113,8 +115,11 @@ class BillingService(
     }
 
     private suspend fun processInvoice(customer: Customer, invoice: Invoice) {
+        updateInvoiceStatus(customer, invoice, InvoiceStatus.IN_PROGRESS)
         if (processInvoiceWithRetry(invoice)) {
-            updateInvoiceStatus(customer, invoice)
+            if (updateInvoiceStatus(customer, invoice, InvoiceStatus.PAID)) {
+                notifyEvent(EventStatus.INVOICE_PROCESSED, customer, invoice)
+            }
         } else {
             notifyEvent(EventStatus.INSUFFICIENT_FUNDS, customer, invoice)
         }
@@ -128,10 +133,9 @@ class BillingService(
         return processed
     }
 
-    private fun updateInvoiceStatus(customer: Customer, invoice: Invoice): Boolean {
+    private fun updateInvoiceStatus(customer: Customer, invoice: Invoice, status: InvoiceStatus): Boolean {
         return try {
-            invoiceService.updateInvoiceStatus(invoice, InvoiceStatus.PAID)
-            notifyEvent(EventStatus.INVOICE_PROCESSED, customer, invoice)
+            invoiceService.updateInvoiceStatus(invoice, status)
             true
         } catch (e: InvoiceNotUpdatedException) {
             notifyError(e, customer, invoice)
